@@ -32,7 +32,7 @@ class ConstructorTester(unittest.TestCase):
             # randomly propose a candidate
             shuffle(node_list)
             edge = (node_list[0], node_list[1])
-            if edge not in total_edges:
+            if edge not in total_edges and edge[::-1] not in total_edges:
                 total_edges.append(edge)
 
             # sanity check - too many random failures
@@ -48,31 +48,41 @@ class ConstructorTester(unittest.TestCase):
         self.cuts = 2
         self.end_condition = "="
 
-        self.random_graph_nodes = randint(4, 11)
-        _, self.random_edge_list = self.graph_constructor(self.random_graph_nodes)
+        self.increasing_size_graphs = [*range(4, 12)]
+        self.random_graphs = [(i, self.graph_constructor(i)[1]) for i in self.increasing_size_graphs]
 
     def test_adder_size(self):
+        """
+        test adder size allocator function. It should allocate proper number of qbits for any graph
+
+        for example, if graph has 6 edges, a minimum adder should be able to add to 2^3 -> 8
+        so size should be 3 qbits (2^0, 2^1, 2^2 -> in total 1 + 2 + 4)
+
+        another example 47 edges -> "63 adder" (6 bit -> 1 + 2 + 4 + 8 + 16 + 32
+        """
         test_constructor = Graph2Cut(
             self.simple_graph_nodes, self.simple_graph_edges,
             self.cuts, self.end_condition
         )
-        test_constructor2 = Graph2Cut(
-            self.random_graph_nodes, self.random_edge_list,
-            cuts_number=len(self.random_edge_list), condition=self.end_condition
-        )
-        test_constructor2.allocate_qbits()
         test_constructor.allocate_qbits()
         self.assertEqual(len(test_constructor.quantum_adder_register), 2)
-        if 2 < len(self.random_edge_list) <= 4:
-            self.assertEqual(len(test_constructor2.quantum_adder_register), 3)
-        elif 4 < len(self.random_edge_list) <= 8:
-            self.assertEqual(len(test_constructor2.quantum_adder_register), 4)
-        elif 8 < len(self.random_edge_list) <= 16:
-            self.assertEqual(len(test_constructor2.quantum_adder_register), 5)
-        elif 16 < len(self.random_edge_list) <= 32:
-            self.assertEqual(len(test_constructor2.quantum_adder_register), 6)
-        elif 32 < len(self.random_edge_list) <= 64:
-            self.assertEqual(len(test_constructor2.quantum_adder_register), 7)
+
+        for graph in self.random_graphs:
+            test_constructor2 = Graph2Cut(
+                graph[0], graph[1],
+                cuts_number=len(graph[1]), condition=self.end_condition
+            )
+            test_constructor2.allocate_qbits()
+            if 2 <= len(graph[1]) < 4:
+                self.assertEqual(len(test_constructor2.quantum_adder_register), 2)
+            elif 4 <= len(graph[1]) < 8:
+                self.assertEqual(len(test_constructor2.quantum_adder_register), 3)
+            elif 8 <= len(graph[1]) < 16:
+                self.assertEqual(len(test_constructor2.quantum_adder_register), 4)
+            elif 16 <= len(graph[1]) < 32:
+                self.assertEqual(len(test_constructor2.quantum_adder_register), 5)
+            elif 32 <= len(graph[1]) < 64:
+                self.assertEqual(len(test_constructor2.quantum_adder_register), 6)
 
 
 if __name__ == '__main__':

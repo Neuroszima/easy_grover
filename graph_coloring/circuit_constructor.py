@@ -18,11 +18,11 @@ class Graph2Cut:
 
     def minimal_adder_size(self):
         i = 1
-        while len(self.edge_list) > 2**i:
+        while len(self.edge_list) >= 2**i:
             i += 1
             if i > 10:
                 break
-        return i+1
+        return i
 
     def allocate_qbits(self):
         self.node_qbit_register = QuantumRegister(self.graph_nodes)
