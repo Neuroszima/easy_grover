@@ -1,19 +1,23 @@
 import unittest
-from random import randint, shuffle
+from random import shuffle
 from copy import deepcopy
+from math import floor, log2
 
 from circuit_constructor import Graph2Cut
 
 
 class ConstructorTester(unittest.TestCase):
 
-    def graph_constructor(self, node_number):
+    def graph_constructor(self, node_number, chain_only=False) -> tuple:
         """
         makes a fully connected graph with (at least) all nodes connected in a chain
-        then adds different edges to make a graph appear more interconnected than it starts form, looking
+        then adds different edges to make a graph appear more interconnected than it starts from, looking
         back if there is no repeat among already connected edges.
 
         makes ~65-68% of possible interconnects in a graph with selected number of nodes
+
+        :param chain_only: a check that forces a graph to only include single chain of all nodes connected
+        :return: tuple -> (number of possible edges, list of edges representing graph structure)
         """
         # count possible number of connections
         all_possibilities = sum([*range(1, node_number)])
@@ -24,6 +28,9 @@ class ConstructorTester(unittest.TestCase):
         start_nodes = node_list[:-1]
         end_nodes = node_list[1:]
         starting_edges = [(s_node, e_node) for s_node, e_node in zip(start_nodes, end_nodes)]
+
+        if chain_only:
+            return all_possibilities, starting_edges
 
         # until condition is met, add another couple connections to the graph
         total_edges = deepcopy(starting_edges)
@@ -50,6 +57,10 @@ class ConstructorTester(unittest.TestCase):
 
         self.increasing_size_graphs = [*range(4, 12)]
         self.random_graphs = [(i, self.graph_constructor(i)[1]) for i in self.increasing_size_graphs]
+        self.random_chain_graphs = [
+            (i, self.graph_constructor(i, chain_only=True)[1])
+            for i in self.increasing_size_graphs
+        ]
 
     def test_adder_size(self):
         """
@@ -60,29 +71,44 @@ class ConstructorTester(unittest.TestCase):
 
         another example 47 edges -> "63 adder" (6 bit -> 1 + 2 + 4 + 8 + 16 + 32
         """
-        test_constructor = Graph2Cut(
+        test_circuit_builder = Graph2Cut(
             self.simple_graph_nodes, self.simple_graph_edges,
             self.cuts, self.end_condition
         )
-        test_constructor.allocate_qbits()
-        self.assertEqual(len(test_constructor.quantum_adder_register), 2)
+        test_circuit_builder._allocate_qbits()
+        self.assertEqual(len(test_circuit_builder.quantum_adder_register), 2)
 
         for graph in self.random_graphs:
-            test_constructor2 = Graph2Cut(
+            test_circuit_builder2 = Graph2Cut(
                 graph[0], graph[1],
                 cuts_number=len(graph[1]), condition=self.end_condition
             )
-            test_constructor2.allocate_qbits()
+            test_circuit_builder2._allocate_qbits()
             if 2 <= len(graph[1]) < 4:
-                self.assertEqual(len(test_constructor2.quantum_adder_register), 2)
+                self.assertEqual(len(test_circuit_builder2.quantum_adder_register), 2)
             elif 4 <= len(graph[1]) < 8:
-                self.assertEqual(len(test_constructor2.quantum_adder_register), 3)
+                self.assertEqual(len(test_circuit_builder2.quantum_adder_register), 3)
             elif 8 <= len(graph[1]) < 16:
-                self.assertEqual(len(test_constructor2.quantum_adder_register), 4)
+                self.assertEqual(len(test_circuit_builder2.quantum_adder_register), 4)
             elif 16 <= len(graph[1]) < 32:
-                self.assertEqual(len(test_constructor2.quantum_adder_register), 5)
+                self.assertEqual(len(test_circuit_builder2.quantum_adder_register), 5)
             elif 32 <= len(graph[1]) < 64:
-                self.assertEqual(len(test_constructor2.quantum_adder_register), 6)
+                self.assertEqual(len(test_circuit_builder2.quantum_adder_register), 6)
+
+    def test_simple_qbit_allocation(self):
+        """
+        test qbit/cbit registers being properly allocated for a graph structure that
+        only consist a single chain of edges (no other interconnections)
+        """
+        for graph in self.random_chain_graphs:
+            nodes, edges = graph
+            test_circuit_builder = Graph2Cut(nodes, edge_list=edges, cuts_number=len(edges), condition='=')
+            test_circuit_builder._allocate_qbits()
+            self.assertEqual(len(test_circuit_builder.quantum_adder_register), floor(log2(nodes-1))+1)
+            self.assertEqual(len(test_circuit_builder.edge_qbit_register), len(edges))
+            self.assertEqual(len(test_circuit_builder.results_register), nodes)
+            self.assertEqual(len(test_circuit_builder.node_qbit_register), nodes)
+            self.assertEqual(len(test_circuit_builder.ancilla_qbit_register), 1)
 
 
 if __name__ == '__main__':
