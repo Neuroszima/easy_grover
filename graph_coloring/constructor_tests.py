@@ -55,7 +55,8 @@ class ConstructorTester(unittest.TestCase):
         self.cuts = 2
         self.end_condition = "="
 
-        self.increasing_size_graphs = [*range(4, 12)]
+        # computational complexity for a naive approach for 12 node graph is already huge, stopping at this level
+        self.increasing_size_graphs = [*range(4, 13)]
         self.random_graphs = [(i, self.graph_constructor(i)[1]) for i in self.increasing_size_graphs]
         self.random_chain_graphs = [
             (i, self.graph_constructor(i, chain_only=True)[1])
@@ -69,7 +70,7 @@ class ConstructorTester(unittest.TestCase):
         for example, if graph has 6 edges, a minimum adder should be able to add to 2^3 -> 8
         so size should be 3 qbits (2^0, 2^1, 2^2 -> in total 1 + 2 + 4)
 
-        another example 47 edges -> "63 adder" (6 bit -> 1 + 2 + 4 + 8 + 16 + 32
+        another example 47 edges -> "63 adder" (6 bit -> 1 + 2 + 4 + 8 + 16 + 32)
         """
         test_circuit_builder = Graph2Cut(
             self.simple_graph_nodes, self.simple_graph_edges,
@@ -109,6 +110,75 @@ class ConstructorTester(unittest.TestCase):
             self.assertEqual(len(test_circuit_builder.results_register), nodes)
             self.assertEqual(len(test_circuit_builder.node_qbit_register), nodes)
             self.assertEqual(len(test_circuit_builder.ancilla_qbit_register), 1)
+
+    unittest.skip("not implemented")
+    def test_edge_detector(self):
+        """
+        test whether edges are properly detected and flagged as '1' in respected qbits
+        """
+
+    unittest.skip("not implemented")
+    def test_adder(self):
+        """
+        test if adder sub-circuit functions and counts properly qbits that are given for certain grover problem
+        """
+
+    unittest.skip("not implemented")
+    def test_flag_by_condition(self):
+        """
+        test if condition sub-circuit really flags the state for given solution
+        """
+
+    unittest.skip("not implemented")
+    def test_grover_diffusion(self):
+        """
+        test if 'inversion by the mean' really works for given solutions
+        """
+
+    unittest.skip("not implemented")
+    def test_chains(self):
+        """
+        test circuit creations and functionality for special case of only 2 solutions being proper in given condition
+
+        there are chains given in this task:
+        ...-o-o-o-o-o-o-o-o-...
+        which yield only 2 possible solutions of max bipartiteness, being:
+        ...-1-0-1-0-1-0-1-0-... and ...-0-1-0-1-0-1-0-1-...
+        meaning solutions have to compliment each other and being a sequences of interleaved 0's and 1's
+        """
+
+    unittest.skip("not implemented")
+    def test_simple_rings(self):
+        """
+        test circuit creations and functionality for a case of rings
+
+        there will be 2 possibilities for maximum bipartiteness, being:
+        (these are only for illustrative purposes and only present part of the ring with idea)
+            o-o            o-o-o
+           /   \          /     \
+          o     o        o      o
+          \   ...         \   ...
+           o-o             o-o
+        meaning - there can be a odd number of nodes and even number of nodes
+
+        odd number of nodes will not yield a full cut in 2 color cases
+        even number of nodes will yield full cut solution similar to a chain case
+
+        odd number of nodes will yield a couple of mirrored solutions if we allow 1 edge not to be cut
+        even number of nodes will yield a lot of solutions if we allow 1 edge not to be cut
+
+        based on this we could create a test to check if automated circuit creation works properly
+        """
+
+    unittest.skip("not implemented")
+    def test_random_circuit(self):
+        """
+        test a random fully connected graph, for its bipartiteness in a given condition
+        look for the most probable answer and check if it satisfies solution condition
+
+        for this test, a new method of graph creation has to be created to grant 100% chance of getting
+        at least 1 proper solution
+        """
 
 
 if __name__ == '__main__':

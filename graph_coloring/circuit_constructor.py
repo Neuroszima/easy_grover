@@ -1,9 +1,11 @@
+import time
+from itertools import pairwise
 from typing import Optional
 from math import floor, log2
 from pprint import pprint
 
 import qiskit.circuit.library
-from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit
+from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit, Aer, execute
 from qiskit.circuit import ControlledGate
 from qiskit.circuit.library.standard_gates import XGate
 from matplotlib import pyplot as plt
@@ -31,11 +33,11 @@ class Graph2Cut:
         """
         creates registers for future purposes
         """
-        self.node_qbit_register = QuantumRegister(self.graph_nodes)
-        self.edge_qbit_register = QuantumRegister(len(self.edge_list))
-        self.quantum_adder_register = QuantumRegister(self.minimal_adder_size())
-        self.results_register = QuantumRegister(self.graph_nodes)
-        self.ancilla_qbit_register = QuantumRegister(1)
+        self.node_qbit_register = QuantumRegister(self.graph_nodes, name="nodes")
+        self.edge_qbit_register = QuantumRegister(len(self.edge_list), name="edges")
+        self.quantum_adder_register = QuantumRegister(self.minimal_adder_size(), name="adder")
+        self.results_register = ClassicalRegister(self.graph_nodes, name="measure")
+        self.ancilla_qbit_register = QuantumRegister(1, name="ancilla")
 
     def _edge_flagging(self, surrounding_barriers=True) -> QuantumCircuit:
         """
@@ -125,35 +127,128 @@ class Graph2Cut:
 
         return grover_adder_circuit
 
-    def assemble_circuits(self):
+    def _condition_checking(self):
+        """
+        prepare a part of the circuit that makes up a condition
+        for a phase flip for solutions space (into "-")
+        """
+        if not self.condition == "=":
+            raise NotImplementedError("other types of comparisons other than '=' are not supported yet")
+
+        checker_circuit = QuantumCircuit(self.quantum_adder_register, self.ancilla_qbit_register)
+        checker_circuit.barrier()
+        # for equality, we flip the bits that should be "0" in the bitwise representation
+        # of given integer, then we "AND" entire adder register together -> making sure all the bits are proper state
+
+        string_of_num = f"{bin(self.cuts_number)[2:]}".zfill(len(self.quantum_adder_register))
+        print(string_of_num)
+        for index, digit in enumerate(reversed(string_of_num)):
+            # apply X whenever there is "0"
+            if digit == "0":
+                checker_circuit.x(self.quantum_adder_register[index])
+
+        MCXGate = XGate().control(len(self.quantum_adder_register))
+        checker_circuit.append(MCXGate, [*self.quantum_adder_register, self.ancilla_qbit_register[0]])
+        return checker_circuit
+
+    def assemble_subcircuits(self):
+        """prepare all the useful sub-circuits to be merged into main one later"""
         self._allocate_qbits()
         edge_checking_circuit = self._edge_flagging()
         adder_circuit = self._adder()
         diffusion_circuit = self._grover_diffusion()
-        return edge_checking_circuit, adder_circuit, diffusion_circuit
-        # c = self._adder()
-        # circuit = cut._grover_diffusion()
-        # obj = c.draw(output="mpl")
-        # print(obj)
-        # plt.show()
+        condition_check_circuit = self._condition_checking()
+
+        pack = edge_checking_circuit, adder_circuit, diffusion_circuit, condition_check_circuit
+        # for c in pack:
+        #     print(pack)
+        return pack
+
+    def construct_circuit(self, diffustion_iterations=3):
+        """
+        based on the iterations passed into this function, create a sequence of
+        gates to be applied in the quantum circuit
+
+        the basic construction chain goes like this:
+
+        do following param algo_iteration times:
+            - check edges (if colors do differ indeed)
+            - add edges that satisfy conditions
+            - perform a check based on the added edges
+            - flip the phase
+            - reverse previous operations to propagate flipped phase
+            - apply grovers diffusion
+
+        finally - measure outcomes
+        :param diffustion_iterations: the number of full steps to achieve probability of
+        finding solutions satisfactory
+        """
+        self.circuit = QuantumCircuit(
+            self.node_qbit_register, self.edge_qbit_register,
+            self.quantum_adder_register, self.ancilla_qbit_register,
+            self.results_register
+        )
+        self.circuit.h(self.node_qbit_register)
+
+        edge_checker, adder, diffusion, condition_checker = self.assemble_subcircuits()
+        # print("in circuits check")
+        # print(f"edge_checker\n{edge_checker}")
+        # print(f"adder\n{adder}")
+        # print(f"diffusion\n{diffusion}")
+        # print(f"condition_checker\n{condition_checker}")
+
+        for _ in range(diffustion_iterations):
+            # oracle step
+            self.circuit.compose(edge_checker, inplace=True)
+            self.circuit.compose(adder, [*self.edge_qbit_register, *self.quantum_adder_register], inplace=True)
+            self.circuit.compose(
+                condition_checker, [*self.quantum_adder_register, self.ancilla_qbit_register[0]], inplace=True)
+            self.circuit.z(self.ancilla_qbit_register[0])
+            self.circuit.compose(
+                condition_checker.reverse_ops(),
+                [*self.quantum_adder_register, self.ancilla_qbit_register[0]],
+                inplace=True
+            )
+            self.circuit.compose(
+                adder.reverse_ops(), [*self.edge_qbit_register, *self.quantum_adder_register], inplace=True)
+            self.circuit.compose(
+                edge_checker.reverse_ops(), [*self.node_qbit_register, *self.edge_qbit_register], inplace=True)
+
+            # diffusion step
+            self.circuit.compose(diffusion, [*self.node_qbit_register], inplace=True)
+
+        self.circuit.barrier()
+        self.circuit.measure(qubit=self.node_qbit_register, cbit=self.results_register)
+
+    def schedule_job_locally(self, backend="qasm_simulator", shots=1000):
+        """
+        run circuit measurements locally on your PC with standard settings
+
+        default simulator to use is 'qasm' that provides only counts and measurements, but any can be used
+        :param backend: simulator backend to use in job scheduler
+        :returns: job results
+        """
+
+        job = execute(self.circuit, Aer.get_backend(backend), shots=shots)
+        counts = job.result().get_counts(self.circuit)
+        return counts
 
 
 if __name__ == '__main__':
     nodes = 3
     edges = [(0, 1), (1, 2)]
-    nodes2 = 7
-    edges2 = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]
+    nodes2 = 13
+    edges2 = [*pairwise(i for i in range(nodes2))]
     cut = Graph2Cut(nodes, edges, len(edges), "=")
     cut2 = Graph2Cut(nodes2, edges2, len(edges2), "=")
-    cut._allocate_qbits()
-    cut2._allocate_qbits()
-    # circuit = cut._grover_diffusion()
-    # obj = circuit.draw(output="mpl")
-    # print(obj)
-    # plt.show()
-    # circuit2 = cut2._grover_diffusion()
-    # obj2 = circuit2.draw(output="mpl")
-    # print(obj2)
-    # plt.show()
-    # cut.test_circuits()
-    # cut2.test_circuits()
+    circuit_book = cut.assemble_subcircuits()
+    circuit_book2 = cut2.assemble_subcircuits()
+    cut.construct_circuit(diffustion_iterations=1)
+    cut2.construct_circuit(diffustion_iterations=3)
+    counts = cut.schedule_job_locally()
+    st = time.time()
+    counts2 = cut2.schedule_job_locally(shots=30000)
+    ed = time.time()
+    print("time", ed - st)
+    print(sorted([(ans, counts[ans]) for ans in counts], key=lambda x: x[1])[::-1])
+    print(sorted([(ans, counts2[ans]) for ans in counts2], key=lambda x: x[1])[::-1])
