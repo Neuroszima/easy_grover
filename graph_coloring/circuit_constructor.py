@@ -14,11 +14,12 @@ from qiskit.circuit.quantumregister import Qubit
 
 class Graph2Cut:
 
-    def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[int, ...]], cuts_number: int, condition: str):
+    def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[int, ...]], cuts_number: int,
+                 condition: str = None):
         self.graph_nodes = nodes
         self.edge_list = edge_list
         self.cuts_number = cuts_number
-        self.condition = condition
+        self.condition = "=" if condition is None else condition
         self.circuit: Optional[QuantumCircuit] = None
         self.node_qbit_register: Optional[QuantumRegister] = None
         self.edge_qbit_register: Optional[QuantumRegister] = None

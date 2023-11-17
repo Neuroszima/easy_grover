@@ -1,9 +1,12 @@
+import random
 import unittest
-from random import shuffle
+from random import shuffle, choice, seed
 from copy import deepcopy
 from math import floor, log2
+from time import time
 
 from circuit_constructor import Graph2Cut
+from qiskit import QuantumRegister, QuantumCircuit, ClassicalRegister, execute, Aer
 
 
 class ConstructorTester(unittest.TestCase):
@@ -111,31 +114,102 @@ class ConstructorTester(unittest.TestCase):
             self.assertEqual(len(test_circuit_builder.node_qbit_register), nodes)
             self.assertEqual(len(test_circuit_builder.ancilla_qbit_register), 1)
 
-    unittest.skip("not implemented")
-    def test_edge_detector(self):
+    def test_edge_detector_chain_case(self):
         """
         test whether edges are properly detected and flagged as '1' in respected qbits
         """
+        # here graph data does matter, though only first few steps of algorithm are checked
+        # 1 - node color mismatch -> a cut; 0 - node color matching -> no cut
 
-    unittest.skip("not implemented")
+        # special case - chain graph, coloring case 01010101010101... -> all edges = 1
+        # example seed: seed_ = 1700207863.558291
+        # chain order -> [(1, 6), (6, 7), (7, 0), (0, 4), (4, 5), (5, 3), (3, 2)]
+        # initialized state -> "01011001"
+        # simulation result -> {"1111111": 10}
+
+        seed_ = time()
+        seed(seed_)
+        print(f"time seed for edge_detector test for chain graph: {seed_}")
+        nodes = 8
+        _, chain_graph = self.graph_constructor(nodes, chain_only=True)
+        print(chain_graph)
+        graph_cutter = Graph2Cut(nodes=nodes, edge_list=chain_graph, cuts_number=len(chain_graph))
+        test_circuit_book = graph_cutter.assemble_subcircuits()
+        edge_checker_subcircuit = test_circuit_book[0]
+        c_register = ClassicalRegister(graph_cutter.edge_qbit_register.size, name="test_register")
+
+        # force all edges to be detected as 1 by careful initialization
+        starting_index = chain_graph[0][0]
+        node_chain = [starting_index] + [e[1] for e in chain_graph]
+        node_values = [
+            (node_index, 1 if i % 2 == 0 else 0)
+            for i, node_index in enumerate(node_chain)
+        ]
+
+        test_circuit = QuantumCircuit(graph_cutter.node_qbit_register, graph_cutter.edge_qbit_register, c_register)
+        for node_index, qbit_starting_value in node_values:
+            if qbit_starting_value:
+                test_circuit.x(graph_cutter.node_qbit_register[node_index])
+
+        measurement_circuit = QuantumCircuit(graph_cutter.edge_qbit_register, c_register)
+        measurement_circuit.measure(graph_cutter.edge_qbit_register, c_register)
+
+        test_circuit.compose(edge_checker_subcircuit, inplace=True)
+        test_circuit.compose(measurement_circuit, [*graph_cutter.edge_qbit_register], inplace=True)
+        job = execute(test_circuit, Aer.get_backend("qasm_simulator"), shots=10)
+        counts = job.result().get_counts()
+        counts_list = [(measurement, counts[measurement]) for measurement in counts]
+        self.assertEqual(counts_list[0][0], "".join(['1' for _ in range(graph_cutter.edge_qbit_register.size)]))
+        self.assertEqual(counts_list[0][1], 10)
+
+    @unittest.skip("not implemented")
     def test_adder(self):
         """
         test if adder sub-circuit functions and counts properly qbits that are given for certain grover problem
         """
+        # here we just use
+        # 1 - node color mismatch -> a cut; 0 - node color matching -> no cut
+        seed_ = time()
+        seed(seed_)
+        print(f"time seed for test_adder: {seed_}")
+        random_graph = choice(self.random_graphs)
+        nodes, edges = random_graph
+        two_cut = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges))
+        sub_circuit_book = two_cut.assemble_subcircuits()
+        edge_checker_circuit = sub_circuit_book[0]
+        adder_circuit = sub_circuit_book[1]
 
-    unittest.skip("not implemented")
+        # generate 'simulated cut occurences' and initialize them as "X" gates in edge register
+        test_cases = [
+            "".join(['0' for _ in range(two_cut.edge_qbit_register.size)]),  # special case - 0
+            "".join(['1' for _ in range(two_cut.edge_qbit_register.size)]),  # special case - full 1 state
+            # random 10 cases that should
+            *["".join([choice(["0", "1"]) for i in range(two_cut.edge_qbit_register.size)]) for _ in range(10)]
+        ]
+
+        for t in test_cases:
+            correct_count = sum([int(c == "1") for c in t])
+            # prepare full circuit for fuutre composition purposes
+            c_register = ClassicalRegister(two_cut.quantum_adder_register.size, name="test_register")
+            test_circuit = QuantumCircuit(two_cut.edge_qbit_register, two_cut.quantum_adder_register, c_register)
+
+            # prepare measurement operation
+            measurement_circuit = QuantumCircuit(two_cut.quantum_adder_register, c_register)
+            measurement_circuit.measure(two_cut.quantum_adder_register, c_register)
+
+    @unittest.skip("not implemented")
     def test_flag_by_condition(self):
         """
         test if condition sub-circuit really flags the state for given solution
         """
 
-    unittest.skip("not implemented")
+    @unittest.skip("not implemented")
     def test_grover_diffusion(self):
         """
         test if 'inversion by the mean' really works for given solutions
         """
 
-    unittest.skip("not implemented")
+    @unittest.skip("not implemented")
     def test_chains(self):
         """
         test circuit creations and functionality for special case of only 2 solutions being proper in given condition
@@ -147,7 +221,7 @@ class ConstructorTester(unittest.TestCase):
         meaning solutions have to compliment each other and being a sequences of interleaved 0's and 1's
         """
 
-    unittest.skip("not implemented")
+    @unittest.skip("not implemented")
     def test_simple_rings(self):
         """
         test circuit creations and functionality for a case of rings
@@ -170,7 +244,7 @@ class ConstructorTester(unittest.TestCase):
         based on this we could create a test to check if automated circuit creation works properly
         """
 
-    unittest.skip("not implemented")
+    @unittest.skip("not implemented")
     def test_random_circuit(self):
         """
         test a random fully connected graph, for its bipartiteness in a given condition
