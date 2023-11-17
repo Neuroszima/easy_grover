@@ -1,4 +1,3 @@
-import random
 import unittest
 from random import shuffle, choice, seed
 from copy import deepcopy
@@ -6,7 +5,8 @@ from math import floor, log2
 from time import time
 
 from circuit_constructor import Graph2Cut
-from qiskit import QuantumRegister, QuantumCircuit, ClassicalRegister, execute, Aer
+from qiskit import QuantumRegister, QuantumCircuit, ClassicalRegister
+from qiskit_aer.backends import AerSimulator
 
 
 class ConstructorTester(unittest.TestCase):
@@ -132,7 +132,6 @@ class ConstructorTester(unittest.TestCase):
         print(f"time seed for edge_detector test for chain graph: {seed_}")
         nodes = 8
         _, chain_graph = self.graph_constructor(nodes, chain_only=True)
-        print(chain_graph)
         graph_cutter = Graph2Cut(nodes=nodes, edge_list=chain_graph, cuts_number=len(chain_graph))
         test_circuit_book = graph_cutter.assemble_subcircuits()
         edge_checker_subcircuit = test_circuit_book[0]
@@ -155,8 +154,9 @@ class ConstructorTester(unittest.TestCase):
         measurement_circuit.measure(graph_cutter.edge_qbit_register, c_register)
 
         test_circuit.compose(edge_checker_subcircuit, inplace=True)
-        test_circuit.compose(measurement_circuit, [*graph_cutter.edge_qbit_register], inplace=True)
-        job = execute(test_circuit, Aer.get_backend("qasm_simulator"), shots=10)
+        test_circuit.compose(measurement_circuit, graph_cutter.edge_qbit_register, inplace=True)
+        simulator = AerSimulator()
+        job = simulator.run(test_circuit, shots=10)
         counts = job.result().get_counts()
         counts_list = [(measurement, counts[measurement]) for measurement in counts]
         self.assertEqual(counts_list[0][0], "".join(['1' for _ in range(graph_cutter.edge_qbit_register.size)]))
@@ -179,17 +179,17 @@ class ConstructorTester(unittest.TestCase):
         edge_checker_circuit = sub_circuit_book[0]
         adder_circuit = sub_circuit_book[1]
 
-        # generate 'simulated cut occurences' and initialize them as "X" gates in edge register
+        # generate 'simulated cut occurrences' and initialize them as "X" gates in edge register
         test_cases = [
             "".join(['0' for _ in range(two_cut.edge_qbit_register.size)]),  # special case - 0
             "".join(['1' for _ in range(two_cut.edge_qbit_register.size)]),  # special case - full 1 state
             # random 10 cases that should
-            *["".join([choice(["0", "1"]) for i in range(two_cut.edge_qbit_register.size)]) for _ in range(10)]
+            *["".join([choice(["0", "1"]) for _ in range(two_cut.edge_qbit_register.size)]) for __ in range(10)]
         ]
 
         for t in test_cases:
             correct_count = sum([int(c == "1") for c in t])
-            # prepare full circuit for fuutre composition purposes
+            # prepare full circuit for future composition purposes
             c_register = ClassicalRegister(two_cut.quantum_adder_register.size, name="test_register")
             test_circuit = QuantumCircuit(two_cut.edge_qbit_register, two_cut.quantum_adder_register, c_register)
 
@@ -230,10 +230,10 @@ class ConstructorTester(unittest.TestCase):
         (these are only for illustrative purposes and only present part of the ring with idea)
             o-o            o-o-o
            /   \          /     \
-          o     o        o      o
+          o     o        o       o
           \   ...         \   ...
            o-o             o-o
-        meaning - there can be a odd number of nodes and even number of nodes
+        meaning - there can be odd number of nodes and even number of nodes
 
         odd number of nodes will not yield a full cut in 2 color cases
         even number of nodes will yield full cut solution similar to a chain case
@@ -245,7 +245,7 @@ class ConstructorTester(unittest.TestCase):
         """
 
     @unittest.skip("not implemented")
-    def test_random_circuit(self):
+    def test_random_graph(self):
         """
         test a random fully connected graph, for its bipartiteness in a given condition
         look for the most probable answer and check if it satisfies solution condition
@@ -261,4 +261,3 @@ if __name__ == '__main__':
     #     print(i, possibilities, f"edge_statistic {len(edges_chosen) / possibilities}")
     #     print(len(edges_chosen), edges_chosen[:int(len(edges_chosen) * 0.75)], "...")
     unittest.main()
-

@@ -5,7 +5,8 @@ from math import floor, log2
 from pprint import pprint
 
 import qiskit.circuit.library
-from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit, Aer, execute
+from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit
+from qiskit_aer.backends import AerSimulator
 from qiskit.circuit import ControlledGate
 from qiskit.circuit.library.standard_gates import XGate
 from matplotlib import pyplot as plt
@@ -142,9 +143,8 @@ class Graph2Cut:
         # of given integer, then we "AND" entire adder register together -> making sure all the bits are proper state
 
         string_of_num = f"{bin(self.cuts_number)[2:]}".zfill(len(self.quantum_adder_register))
-        print(string_of_num)
         for index, digit in enumerate(reversed(string_of_num)):
-            # apply X whenever there is "0"
+            # apply X wherever there is "0"
             if digit == "0":
                 checker_circuit.x(self.quantum_adder_register[index])
 
@@ -221,16 +221,15 @@ class Graph2Cut:
         self.circuit.barrier()
         self.circuit.measure(qubit=self.node_qbit_register, cbit=self.results_register)
 
-    def schedule_job_locally(self, backend="qasm_simulator", shots=1000):
+    def schedule_job_locally(self, shots=1000):
         """
         run circuit measurements locally on your PC with standard settings
 
         default simulator to use is 'qasm' that provides only counts and measurements, but any can be used
-        :param backend: simulator backend to use in job scheduler
         :returns: job results
         """
 
-        job = execute(self.circuit, Aer.get_backend(backend), shots=shots)
+        job = AerSimulator().run(self.circuit, shots=shots)
         counts = job.result().get_counts(self.circuit)
         return counts
 
