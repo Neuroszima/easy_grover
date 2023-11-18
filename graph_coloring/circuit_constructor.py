@@ -15,11 +15,27 @@ from qiskit.circuit.quantumregister import Qubit
 
 class Graph2Cut:
 
-    def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[int, ...]], cuts_number: int,
-                 condition: str = None):
+    def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[int, ...]], cuts_number: int = None,
+                 condition: str = None, optimization: str = "gates"):
+        """
+        Perform a graph splitting, based on the graph coloring problem. Only 2 colors are supported by this solver
+
+        For graph splitting, most essential information comes from nodes and edge list, followed
+        by the number of cuts to be performed
+
+        "optimization" parameter here makes a tradeoff between number of qbits solution uses and gates.
+        "qbits" entry gets rid of entire "edge flagging" part of quantum algorithm, making this up with the
+        use of 1 ancilla to store the result temporarily.
+
+        :param nodes: total number of graph members
+        :param edge_list: list of 2-member tuples/iterables, that represents graph structure
+        :param cuts_number: len(edge_list) is the default
+        :param condition: "=" is default
+        :param optimization: "gates" or "qbits" are possible modifiers
+        """
         self.graph_nodes = nodes
         self.edge_list = edge_list
-        self.cuts_number = cuts_number
+        self.cuts_number = len(self.edge_list) if cuts_number is None else cuts_number
         self.condition = "=" if condition is None else condition
         self.circuit: Optional[QuantumCircuit] = None
         self.node_qbit_register: Optional[QuantumRegister] = None

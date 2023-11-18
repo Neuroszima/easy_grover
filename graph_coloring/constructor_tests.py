@@ -1,4 +1,5 @@
 import unittest
+from pprint import pprint
 from random import shuffle, choice, seed
 from copy import deepcopy
 from math import floor, log2
@@ -51,6 +52,14 @@ class ConstructorTester(unittest.TestCase):
                 break
 
         return all_possibilities, total_edges
+
+    def prepare_circuit_measurements(self, tested_circuit: QuantumCircuit, shots=10):
+        """perform circuit simulation from tested circuit"""
+        # ('automatic', 'statevector', 'density_matrix', 'stabilizer', 'matrix_product_state', 'extended_stabilizer', 'unitary', 'superop')
+        job = AerSimulator().run(tested_circuit, shots=shots, method='automatic')
+        counts = job.result().get_counts()
+        counts_list = [(measurement, counts[measurement]) for measurement in counts]
+        return counts_list
 
     def setUp(self) -> None:
         self.simple_graph_nodes = 3
@@ -155,47 +164,62 @@ class ConstructorTester(unittest.TestCase):
 
         test_circuit.compose(edge_checker_subcircuit, inplace=True)
         test_circuit.compose(measurement_circuit, graph_cutter.edge_qbit_register, inplace=True)
-        simulator = AerSimulator()
-        job = simulator.run(test_circuit, shots=10)
-        counts = job.result().get_counts()
-        counts_list = [(measurement, counts[measurement]) for measurement in counts]
+
+        counts_list = self.prepare_circuit_measurements(test_circuit)
         self.assertEqual(counts_list[0][0], "".join(['1' for _ in range(graph_cutter.edge_qbit_register.size)]))
         self.assertEqual(counts_list[0][1], 10)
 
-    @unittest.skip("not implemented")
+    # @unittest.skip("not implemented")
     def test_adder(self):
         """
         test if adder sub-circuit functions and counts properly qbits that are given for certain grover problem
         """
         # here we just use
         # 1 - node color mismatch -> a cut; 0 - node color matching -> no cut
-        seed_ = time()
+        # seed_ = time()
+        seed_ = 1700216428.893547
         seed(seed_)
         print(f"time seed for test_adder: {seed_}")
-        random_graph = choice(self.random_graphs)
+        random_graph = self.random_graphs[4]
+
         nodes, edges = random_graph
-        two_cut = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges))
-        sub_circuit_book = two_cut.assemble_subcircuits()
-        edge_checker_circuit = sub_circuit_book[0]
+        graph_cutter = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges))
+        sub_circuit_book = graph_cutter.assemble_subcircuits()
         adder_circuit = sub_circuit_book[1]
 
         # generate 'simulated cut occurrences' and initialize them as "X" gates in edge register
         test_cases = [
-            "".join(['0' for _ in range(two_cut.edge_qbit_register.size)]),  # special case - 0
-            "".join(['1' for _ in range(two_cut.edge_qbit_register.size)]),  # special case - full 1 state
+            "".join(['0' for _ in range(graph_cutter.edge_qbit_register.size)]),  # special case - 0
+            "".join(['1' for _ in range(graph_cutter.edge_qbit_register.size)]),  # special case - full 1 state
             # random 10 cases that should
-            *["".join([choice(["0", "1"]) for _ in range(two_cut.edge_qbit_register.size)]) for __ in range(10)]
+            *["".join([choice(["0", "1"]) for _ in range(graph_cutter.edge_qbit_register.size)]) for __ in range(10)]
         ]
+        pprint(test_cases)
 
-        for t in test_cases:
-            correct_count = sum([int(c == "1") for c in t])
+        for case in test_cases:
+            correct_count = sum([int(c == "1") for c in case])
             # prepare full circuit for future composition purposes
-            c_register = ClassicalRegister(two_cut.quantum_adder_register.size, name="test_register")
-            test_circuit = QuantumCircuit(two_cut.edge_qbit_register, two_cut.quantum_adder_register, c_register)
+            c_register = ClassicalRegister(graph_cutter.quantum_adder_register.size, name="test_register")
+            test_circuit = QuantumCircuit(graph_cutter.edge_qbit_register, graph_cutter.quantum_adder_register, c_register)
+
+            for node_index, qbit_starting_value in enumerate(case):
+                if int(qbit_starting_value):
+                    test_circuit.x(graph_cutter.edge_qbit_register[node_index])
+            test_circuit.barrier()
 
             # prepare measurement operation
-            measurement_circuit = QuantumCircuit(two_cut.quantum_adder_register, c_register)
-            measurement_circuit.measure(two_cut.quantum_adder_register, c_register)
+            measurement_circuit = QuantumCircuit(graph_cutter.quantum_adder_register, c_register)
+            measurement_circuit.measure(graph_cutter.quantum_adder_register, c_register)
+
+            test_circuit.compose(adder_circuit, inplace=True)
+            test_circuit.compose(measurement_circuit, graph_cutter.quantum_adder_register, inplace=True)
+            counts_list = self.prepare_circuit_measurements(test_circuit)
+            print(counts_list)
+            # break
+            print(case, counts_list)
+            self.assertEqual(correct_count, int(counts_list[0][0], base=2))
+            self.assertEqual(10, counts_list[0][1])
+
 
     @unittest.skip("not implemented")
     def test_flag_by_condition(self):
