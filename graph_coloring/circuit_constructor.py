@@ -16,7 +16,7 @@ from qiskit.circuit.quantumregister import Qubit
 class Graph2Cut:
 
     def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[int, ...]], cuts_number: int = None,
-                 condition: str = None, optimization: str = "gates"):
+                 condition: str = None, optimization: str = None):
         """
         Perform a graph splitting, based on the graph coloring problem. Only 2 colors are supported by this solver
 
@@ -31,18 +31,27 @@ class Graph2Cut:
         :param edge_list: list of 2-member tuples/iterables, that represents graph structure
         :param cuts_number: len(edge_list) is the default
         :param condition: "=" is default
-        :param optimization: "gates" or "qbits" are possible modifiers
+        :param optimization: "gates" or "qbits" are possible modifiers ("gates" is default)
         """
         self.graph_nodes = nodes
         self.edge_list = edge_list
         self.cuts_number = len(self.edge_list) if cuts_number is None else cuts_number
         self.condition = "=" if condition is None else condition
+        self.optimization = "gates" if optimization is None else optimization
         self.circuit: Optional[QuantumCircuit] = None
         self.node_qbit_register: Optional[QuantumRegister] = None
         self.edge_qbit_register: Optional[QuantumRegister] = None
         self.quantum_adder_register: Optional[QuantumRegister] = None
         self.ancilla_qbit_register: Optional[QuantumRegister] = None
         self.results_register: Optional[ClassicalRegister] = None
+        self.controlled_gate_dict = dict()
+
+        self._allocate_qbits()
+        # Create gate dictionary of elements that are required for addition purposes.
+        # The most complex (n-C)X has to satisfy the qbit index of the last qbit expressing
+        # the most significant power-of-2 bit in classical meaning
+        for index, _ in enumerate(self.quantum_adder_register):
+            self.controlled_gate_dict[index+1] = XGate().control(index+1)
 
     def minimal_adder_size(self):
         return floor(log2(len(self.edge_list)))+1
@@ -52,10 +61,13 @@ class Graph2Cut:
         creates registers for future purposes
         """
         self.node_qbit_register = QuantumRegister(self.graph_nodes, name="nodes")
-        self.edge_qbit_register = QuantumRegister(len(self.edge_list), name="edges")
         self.quantum_adder_register = QuantumRegister(self.minimal_adder_size(), name="adder")
         self.results_register = ClassicalRegister(self.graph_nodes, name="measure")
-        self.ancilla_qbit_register = QuantumRegister(1, name="ancilla")
+        if self.optimization == "gates":
+            self.edge_qbit_register = QuantumRegister(len(self.edge_list), name="edges")
+            self.ancilla_qbit_register = QuantumRegister(1, name="ancilla")
+        elif self.optimization == 'qbits':
+            self.ancilla_qbit_register = QuantumRegister(2, name="ancilla")
 
     def _edge_flagging(self, surrounding_barriers=True) -> QuantumCircuit:
         """
@@ -84,11 +96,18 @@ class Graph2Cut:
         """
 
         grover_diffusion_circuit = QuantumCircuit(self.node_qbit_register)
-        z_gate_controlled = qiskit.circuit.library.ZGate().control(num_ctrl_qubits=len(self.node_qbit_register)-1)
+        x_gate_controlled = XGate().control(num_ctrl_qubits=len(self.node_qbit_register)-1)
+        # z_gate_controlled = qiskit.circuit.library.ZGate().control(num_ctrl_qubits=len(self.node_qbit_register)-1)
 
         grover_diffusion_circuit.h(self.node_qbit_register)
         grover_diffusion_circuit.x(self.node_qbit_register)
-        grover_diffusion_circuit.append(z_gate_controlled, self.node_qbit_register)
+
+        # I had troubles with qiskit recognizing n-(c)ZGate, this construct seems to work as an equivalent
+        grover_diffusion_circuit.h(self.node_qbit_register[-1])
+        grover_diffusion_circuit.append(x_gate_controlled, [*self.node_qbit_register])
+        grover_diffusion_circuit.h(self.node_qbit_register[-1])
+        # grover_diffusion_circuit.append(z_gate_controlled, self.node_qbit_register)
+
         grover_diffusion_circuit.x(self.node_qbit_register)
         grover_diffusion_circuit.h(self.node_qbit_register)
 
@@ -101,14 +120,6 @@ class Graph2Cut:
         """
 
         grover_adder_circuit = QuantumCircuit(self.edge_qbit_register, self.quantum_adder_register)
-        controled_gate_dict = dict()
-
-        # Create gate dictionary of elements that are required for addition purposes.
-        # The most complex (n-C)X has to satisfy the qbit index of the last qbit being in the order of.
-        for index, _ in enumerate(self.quantum_adder_register):
-            controled_gate_dict[index+1] = XGate().control(index+1)
-
-        # print(controled_gate_dict)
 
         all_gates = []
         for qbit_index, qbit in enumerate(self.edge_qbit_register):
@@ -120,7 +131,7 @@ class Graph2Cut:
             # print(f"{temp=} now")
             gates_for_qbit = []
             while temp > 0:
-                gates_for_qbit.append([qbit, controled_gate_dict[temp]])
+                gates_for_qbit.append([qbit, self.controlled_gate_dict[temp]])
                 temp -= 1
             all_gates.extend(gates_for_qbit)
 
@@ -165,23 +176,78 @@ class Graph2Cut:
                 checker_circuit.x(self.quantum_adder_register[index])
 
         MCXGate = XGate().control(len(self.quantum_adder_register))
-        checker_circuit.append(MCXGate, [*self.quantum_adder_register, self.ancilla_qbit_register[0]])
+        checker_circuit.append(MCXGate, [*self.quantum_adder_register, self.ancilla_qbit_register[-1]])
         return checker_circuit
+
+    def _add_single_edge(self, edge_index: int, edge_0_qbit, edge_1_qbit, ancilla_qbit):
+        """prepare a small sub-circuit that adds the edge check result to the accumulator"""
+
+        # create a single adder pyramid
+        temp = floor(int(log2(edge_index + 1))) + 1
+        # print(f"{temp=} now")
+        gates_for_qbit: list[ControlledGate] = []
+        # compared to forming an adder circuit openly, here we always use the same ancilla qbit as target for gate
+        while temp > 0:
+            gates_for_qbit.append(self.controlled_gate_dict[temp])
+            temp -= 1
+
+        # take adder qbits that express highest power-of-2 representation of the edge check result
+        # being added, as if all of them were '1', -1 because one of the participants is ancilla qbit
+        edge_addition_circuit = QuantumCircuit([
+            edge_0_qbit, edge_1_qbit, ancilla_qbit,
+            *self.quantum_adder_register[:gates_for_qbit[0].num_qubits-1]
+        ])
+        edge_addition_circuit.cx(edge_0_qbit, ancilla_qbit)
+        edge_addition_circuit.cx(edge_1_qbit, ancilla_qbit)
+
+        for controlled_gate in gates_for_qbit:
+
+            control_adder_qbits_count = target_adder_bit = controlled_gate.num_qubits - 2
+            if control_adder_qbits_count == 0:
+                control_adder_qbits = []
+            else:
+                control_adder_qbits = [self.quantum_adder_register[i] for i in range(control_adder_qbits_count)]
+
+            edge_addition_circuit.append(
+                controlled_gate, [ancilla_qbit, *control_adder_qbits, self.quantum_adder_register[target_adder_bit]]
+            )
+
+        edge_addition_circuit.cx(edge_1_qbit, ancilla_qbit)
+        edge_addition_circuit.cx(edge_0_qbit, ancilla_qbit)
+
+        # print(f"circuit for compressed addition, {edge_index=}")
+        # edge_addition_circuit.draw(output='mpl', )
+        # plt.show()
+        # print(edge_addition_circuit)
+        return edge_addition_circuit
 
     def assemble_subcircuits(self):
         """prepare all the useful sub-circuits to be merged into main one later"""
-        self._allocate_qbits()
-        edge_checking_circuit = self._edge_flagging()
-        adder_circuit = self._adder()
         diffusion_circuit = self._grover_diffusion()
         condition_check_circuit = self._condition_checking()
+        if self.optimization == "gates":
+            edge_checking_circuit = self._edge_flagging()
+            adder_circuit = self._adder()
 
-        pack = edge_checking_circuit, adder_circuit, diffusion_circuit, condition_check_circuit
-        # for c in pack:
-        #     print(pack)
-        return pack
+            pack = edge_checking_circuit, adder_circuit, diffusion_circuit, condition_check_circuit
+            # for c in pack:
+            #     print(pack)
+            return pack
+        elif self.optimization == "qbits":
+            adder_subcircuits = []
+            for edge_index, edge in enumerate(self.edge_list):
+                subcircuit = self._add_single_edge(
+                    edge_index=edge_index,
+                    edge_0_qbit=self.node_qbit_register[edge[0]],
+                    edge_1_qbit=self.node_qbit_register[edge[1]],
+                    ancilla_qbit=self.ancilla_qbit_register[0],
+                    # adder_qbits=[*self.quantum_adder_register[:]]
+                )
+                adder_subcircuits.append(subcircuit)
+            return adder_subcircuits, diffusion_circuit, condition_check_circuit
+        raise NotImplementedError(f"optimization method {self.optimization} not implemented as valid optimization")
 
-    def construct_circuit(self, diffustion_iterations=3):
+    def construct_circuit(self, diffusion_iterations=3):
         """
         based on the iterations passed into this function, create a sequence of
         gates to be applied in the quantum circuit
@@ -197,8 +263,9 @@ class Graph2Cut:
             - apply grovers diffusion
 
         finally - measure outcomes
-        :param diffustion_iterations: the number of full steps to achieve probability of
-        finding solutions satisfactory
+
+        :param diffusion_iterations: the number of full steps to achieve probability of
+            finding solutions satisfactory
         """
         self.circuit = QuantumCircuit(
             self.node_qbit_register, self.edge_qbit_register,
@@ -214,7 +281,7 @@ class Graph2Cut:
         # print(f"diffusion\n{diffusion}")
         # print(f"condition_checker\n{condition_checker}")
 
-        for _ in range(diffustion_iterations):
+        for _ in range(diffusion_iterations):
             # oracle step
             self.circuit.compose(edge_checker, inplace=True)
             self.circuit.compose(adder, [*self.edge_qbit_register, *self.quantum_adder_register], inplace=True)
@@ -242,9 +309,10 @@ class Graph2Cut:
         run circuit measurements locally on your PC with standard settings
 
         default simulator to use is 'qasm' that provides only counts and measurements, but any can be used
+
         :returns: job results
         """
-
+        # print(self.circuit)
         job = AerSimulator().run(self.circuit, shots=shots)
         counts = job.result().get_counts(self.circuit)
         return counts
@@ -253,18 +321,19 @@ class Graph2Cut:
 if __name__ == '__main__':
     nodes = 3
     edges = [(0, 1), (1, 2)]
-    nodes2 = 13
-    edges2 = [*pairwise(i for i in range(nodes2))]
-    cut = Graph2Cut(nodes, edges, len(edges), "=")
-    cut2 = Graph2Cut(nodes2, edges2, len(edges2), "=")
+    cut = Graph2Cut(nodes, edges, len(edges))
     circuit_book = cut.assemble_subcircuits()
-    circuit_book2 = cut2.assemble_subcircuits()
-    cut.construct_circuit(diffustion_iterations=1)
-    cut2.construct_circuit(diffustion_iterations=3)
+    cut.construct_circuit(diffusion_iterations=1)
     counts = cut.schedule_job_locally()
-    st = time.time()
-    counts2 = cut2.schedule_job_locally(shots=30000)
-    ed = time.time()
-    print("time", ed - st)
     print(sorted([(ans, counts[ans]) for ans in counts], key=lambda x: x[1])[::-1])
-    print(sorted([(ans, counts2[ans]) for ans in counts2], key=lambda x: x[1])[::-1])
+
+    # nodes2 = 11
+    # edges2 = [*pairwise(i for i in range(nodes2))]
+    # cut2 = Graph2Cut(nodes2, edges2, len(edges2))
+    # circuit_book2 = cut2.assemble_subcircuits()
+    # cut2.construct_circuit(diffustion_iterations=3)
+    # st = time.time()
+    # counts2 = cut2.schedule_job_locally(shots=30000)
+    # ed = time.time()
+    # print("time", ed - st)
+    # print(sorted([(ans, counts2[ans]) for ans in counts2], key=lambda x: x[1])[::-1])

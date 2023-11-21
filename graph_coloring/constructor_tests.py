@@ -1,9 +1,12 @@
 import unittest
-from pprint import pprint
+from collections import OrderedDict
+# from pprint import pprint
 from random import shuffle, choice, seed
 from copy import deepcopy
 from math import floor, log2
 from time import time
+
+# from qiskit.circuit import CircuitInstruction
 
 from circuit_constructor import Graph2Cut
 from qiskit import QuantumRegister, QuantumCircuit, ClassicalRegister
@@ -11,6 +14,41 @@ from qiskit_aer.backends import AerSimulator
 
 
 class ConstructorTester(unittest.TestCase):
+
+    @staticmethod
+    def instruction_usage_qbits(graph_cutter: Graph2Cut, edge: tuple[int, ...], edge_index: int):
+        """
+        For adder purposes, construct possible tuples with qubits that need to be used for each gate in given circuit
+        instruction.
+
+        :param graph_cutter: graph class that contains qubits to be checked
+        :param edge: tuple with node initials that should form an edge detection check
+        :param edge_index: index that informs about current size of the adder pyramid to be constructed
+        :return: list of tuples with Qubit objects serving as a check
+        """
+
+        # init and node qubit usage correctness check
+        qubit_gate_usage_list = []
+        for _ in range(2):
+            qubit_gate_usage_list.append(tuple([
+                graph_cutter.node_qbit_register[edge[0]],
+                graph_cutter.ancilla_qbit_register[0]
+            ]))
+            qubit_gate_usage_list.append(tuple([
+                graph_cutter.node_qbit_register[edge[1]],
+                graph_cutter.ancilla_qbit_register[0]
+            ]))
+
+        # pyramid qbit usage correctness check
+        # print(f"number of gates for the {edge_index} = {floor(log2(edge_index+1))+1}")
+        for i in range(floor(log2(edge_index+1))+1):
+            # print(f"adder gate nr {i} for edge {edge_index}")
+            qubit_gate_usage_list.append(tuple([
+                graph_cutter.ancilla_qbit_register[0],
+                *graph_cutter.quantum_adder_register[0:i+1]
+            ]))
+
+        return qubit_gate_usage_list
 
     def graph_constructor(self, node_number, chain_only=False) -> tuple:
         """
@@ -55,7 +93,8 @@ class ConstructorTester(unittest.TestCase):
 
     def prepare_circuit_measurements(self, tested_circuit: QuantumCircuit, shots=10):
         """perform circuit simulation from tested circuit"""
-        # ('automatic', 'statevector', 'density_matrix', 'stabilizer', 'matrix_product_state', 'extended_stabilizer', 'unitary', 'superop')
+        # simulation methods = ('automatic', 'statevector', 'density_matrix', 'stabilizer',
+        # 'matrix_product_state', 'extended_stabilizer', 'unitary', 'superop')
         job = AerSimulator().run(tested_circuit, shots=shots, method='automatic')
         counts = job.result().get_counts()
         counts_list = [(measurement, counts[measurement]) for measurement in counts]
@@ -138,7 +177,7 @@ class ConstructorTester(unittest.TestCase):
 
         seed_ = time()
         seed(seed_)
-        print(f"time seed for edge_detector test for chain graph: {seed_}")
+        # print(f"time seed for edge_detector test for chain graph: {seed_}")
         nodes = 8
         _, chain_graph = self.graph_constructor(nodes, chain_only=True)
         graph_cutter = Graph2Cut(nodes=nodes, edge_list=chain_graph, cuts_number=len(chain_graph))
@@ -169,17 +208,18 @@ class ConstructorTester(unittest.TestCase):
         self.assertEqual(counts_list[0][0], "".join(['1' for _ in range(graph_cutter.edge_qbit_register.size)]))
         self.assertEqual(counts_list[0][1], 10)
 
-    # @unittest.skip("not implemented")
     def test_adder(self):
         """
-        test if adder sub-circuit functions and counts properly qbits that are given for certain grover problem
+        test if regular adder sub-circuit functions and counts properly qbits that are given for certain grover problem
+
+        this is very resource extensive version (memory), thus we use only a small graph to check the adder
         """
         # here we just use
         # 1 - node color mismatch -> a cut; 0 - node color matching -> no cut
         # seed_ = time()
         seed_ = 1700216428.893547
         seed(seed_)
-        print(f"time seed for test_adder: {seed_}")
+        # print(f"time seed for test_adder: {seed_}")
         random_graph = self.random_graphs[4]
 
         nodes, edges = random_graph
@@ -191,16 +231,17 @@ class ConstructorTester(unittest.TestCase):
         test_cases = [
             "".join(['0' for _ in range(graph_cutter.edge_qbit_register.size)]),  # special case - 0
             "".join(['1' for _ in range(graph_cutter.edge_qbit_register.size)]),  # special case - full 1 state
-            # random 10 cases that should
+            # random 10 cases that should simulate some random inputs into the graph
             *["".join([choice(["0", "1"]) for _ in range(graph_cutter.edge_qbit_register.size)]) for __ in range(10)]
         ]
-        pprint(test_cases)
+        # print(test_cases)
 
         for case in test_cases:
             correct_count = sum([int(c == "1") for c in case])
             # prepare full circuit for future composition purposes
             c_register = ClassicalRegister(graph_cutter.quantum_adder_register.size, name="test_register")
-            test_circuit = QuantumCircuit(graph_cutter.edge_qbit_register, graph_cutter.quantum_adder_register, c_register)
+            test_circuit = QuantumCircuit(
+                graph_cutter.edge_qbit_register, graph_cutter.quantum_adder_register, c_register)
 
             for node_index, qbit_starting_value in enumerate(case):
                 if int(qbit_starting_value):
@@ -214,12 +255,64 @@ class ConstructorTester(unittest.TestCase):
             test_circuit.compose(adder_circuit, inplace=True)
             test_circuit.compose(measurement_circuit, graph_cutter.quantum_adder_register, inplace=True)
             counts_list = self.prepare_circuit_measurements(test_circuit)
-            print(counts_list)
+            # print(counts_list)
             # break
-            print(case, counts_list)
+            # print(case, counts_list)
             self.assertEqual(correct_count, int(counts_list[0][0], base=2))
             self.assertEqual(10, counts_list[0][1])
 
+    # @unittest.skip("not implemented fully")
+    def test_qbit_reuse_adder_parts(self):
+        """
+        test sub-circuit creating of the qbit reuse adder
+
+        first a subtest is prepared to check if Qubit ordering works properly and proper Qubits are used to make
+        certain sub-circuits, then the real addition is checked (for each sub-circuit created)
+        """
+        seed_ = time()
+        # seed_ = 1700216428.893547
+        seed(seed_)
+        # print(f"time seed for test_qbit_reuse_adder: {seed_}")
+        random_graph = self.random_chain_graphs[4]
+
+        nodes, edges = random_graph
+        graph_cutter = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges), optimization='qbits')
+        sub_circuit_book = graph_cutter.assemble_subcircuits()
+        edge_counting_subcircuits: list[QuantumCircuit] = sub_circuit_book[0]
+        test_cases = ["00", "01", "10", "11"]
+
+        self.assertEqual(len(edges), len(edge_counting_subcircuits))
+
+        # structure of any sub-circuit in this solution should be - check, addition_pyramid, check_reverse
+        # entire array of sub-circuits should make up for an addition mechanism that uses only a single ancilla and no
+        # color-mismatch qbit storage would be needed making up a qbit-savings
+
+        # construct a list of tuples which represent qbits used in each gate that is a part of every sub-circuit
+        # when its made. This way we make sure that gates are made up from correct pieces within sub-circuits
+        for edge_index, (subcircuit, edge) in enumerate(zip(edge_counting_subcircuits, edges)):
+            all_ops: OrderedDict = subcircuit.count_ops()
+            # print(f'\nnext sub-circuit: {edge}, {edge_index}')
+            predicted_instruction_subregisters = self.instruction_usage_qbits(graph_cutter, edge, edge_index)
+            actual_subregisters = []
+            for op in all_ops:
+                actual_subregisters.extend([instruction.qubits for instruction in subcircuit.get_instructions(op)])
+
+            for qubits_tuple in deepcopy(predicted_instruction_subregisters):
+                # print(f"currently checked tup: {qubits_tuple}")
+                # print(qubits_tuple in actual_subregisters)
+                if qubits_tuple in actual_subregisters:
+                    predicted_instruction_subregisters.pop(
+                        predicted_instruction_subregisters.index(qubits_tuple)
+                    )
+
+            # by popping from the original list, the copies of exact tuples that have exact same contents, we
+            # make sure that every gate has appeared exact number of times that we want sub-circuit to be made from
+
+            # If any mismatch will happen, in this test, we either create too much gates, too many Qubits are used, or
+            # too little gates are created. Either way we will notice by the contents of the list checked, or the test
+            # will result in an error prior to the assert
+
+            self.assertEqual(predicted_instruction_subregisters, [])
 
     @unittest.skip("not implemented")
     def test_flag_by_condition(self):
