@@ -1,5 +1,6 @@
 import unittest
 from collections import OrderedDict
+from itertools import pairwise
 # from pprint import pprint
 from random import shuffle, choice, seed
 from copy import deepcopy
@@ -50,7 +51,8 @@ class ConstructorTester(unittest.TestCase):
 
         return qubit_gate_usage_list
 
-    def graph_constructor(self, node_number, chain_only=False) -> tuple:
+    @staticmethod
+    def graph_constructor(node_number, chain_only=False) -> tuple:
         """
         makes a fully connected graph with (at least) all nodes connected in a chain
         then adds different edges to make a graph appear more interconnected than it starts from, looking
@@ -90,6 +92,65 @@ class ConstructorTester(unittest.TestCase):
                 break
 
         return all_possibilities, total_edges
+
+    @staticmethod
+    def graph_with_certain_solution(node_number) -> tuple:
+        """
+        take a number of nodes, mix them up into 2 piles, colour them and connect in edges to make a final
+        graph with at least 1 valid solution
+
+        then throw in a couple additional valid edges to test the solution for full graph split
+
+        :param node_number: a total number of nodes to be in a graph structure
+        :return: tuple -> (valid solution -> string of 0's and 1's which should appear among solutions,
+            list of edges representing graph structure)
+        """
+        all_possibilities = sum([*range(1, node_number)])
+        nodes = [i for i in range(node_number)]
+        shuffle(nodes)
+        red = nodes[:int(len(nodes) / 2)]
+        blue = nodes[int(len(nodes) / 2):]
+        blue_copy = deepcopy(blue)
+        red_copy = deepcopy(red)
+
+        # take turns taking numbers from red and blue piles, to form a chain that is a valid full partition
+        # always start from bigger list (assume blue), swap if necessary
+        if len(red_copy) > len(blue_copy):
+            red_copy, blue_copy = blue_copy, red_copy
+
+        valid_solution = []
+        interleaved_chain = []
+        for i in range(len(nodes)):
+            if i % 2 == 0:
+                element = blue_copy.pop()
+                interleaved_chain.append(element)
+                valid_solution.append((element, "0"))
+            else:
+                element = red_copy.pop()
+                interleaved_chain.append(element)
+                valid_solution.append((element, "1"))
+
+        valid_solution_str = "".join([e[1] for e in sorted(valid_solution, key=lambda x: x[0])])
+        list_of_edges = [e for e in pairwise(interleaved_chain)]
+
+        # append another edge or couple more to make graph interconnected further
+        total_edges = deepcopy(list_of_edges)
+        i = 0
+        while len(total_edges) < int(0.68 * all_possibilities):
+            # find 2 nodes of opposing colors
+            blue_node = choice(blue)
+            red_node = choice(red)
+
+            edge = (red_node, blue_node)
+            if edge not in total_edges and edge[::-1] not in total_edges:
+                total_edges.append(edge)
+
+            # sanity check - too many random failures
+            i += 1
+            if i > all_possibilities:
+                break
+
+        return valid_solution_str, total_edges
 
     def prepare_circuit_measurements(self, tested_circuit: QuantumCircuit, shots=10):
         """perform circuit simulation from tested circuit"""
