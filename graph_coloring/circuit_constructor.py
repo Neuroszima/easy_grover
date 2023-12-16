@@ -14,7 +14,10 @@ from qiskit.circuit.quantumregister import Qubit
 
 class Graph2Cut:
 
-    def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[int, ...]], cuts_number: int = None,
+    ALLOWED_OPTIMIZERS = ["gates", "qbits"]
+    ALLOWED_CONDITIONS = ["="]
+
+    def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[list[int, ...]]], cuts_number: int = None,
                  condition: str = None, optimization: str = None):
         """
         Perform a graph splitting, based on the graph coloring problem. Only 2 colors are supported by this solver
@@ -35,8 +38,13 @@ class Graph2Cut:
         self.graph_nodes = nodes
         self.edge_list = edge_list
         self.cuts_number = len(self.edge_list) if cuts_number is None else cuts_number
+        if condition not in [*self.ALLOWED_CONDITIONS, None]:
+            raise NotImplementedError("other types of comparisons other than '=' are not supported yet")
         self.condition = "=" if condition is None else condition
-        self.optimization = "gates" if optimization is None else optimization
+        if optimization in [*self.ALLOWED_OPTIMIZERS, None]:
+            self.optimization = "gates" if optimization is None else optimization
+        else:
+            raise NotImplementedError(f'optimization: {optimization} not recognized as valid optimization')
         self.circuit: Optional[QuantumCircuit] = None
         self.node_qbit_register: Optional[QuantumRegister] = None
         self.edge_qbit_register: Optional[QuantumRegister] = None
@@ -44,6 +52,8 @@ class Graph2Cut:
         self.ancilla_qbit_register: Optional[QuantumRegister] = None
         self.results_register: Optional[ClassicalRegister] = None
         self.controlled_gate_dict = dict()
+        self.answer_percentage: Optional[float] = None
+        self.current_job_shots: Optional[int] = None
         self.counts: Optional[dict] = None
 
         self._allocate_qbits()
@@ -59,6 +69,9 @@ class Graph2Cut:
         ]
         self._qbits_total = sum([len(register) if register else 0 for register in regiters])
         self._gates_total = 0
+        self.possible_answers: Optional[list[tuple[int, ...]]] = None
+        self.best_rejected_answer: Optional[tuple[int, ...]] = None
+        self.diffusion_steps = 0
 
     def size(self):
         return {
@@ -180,8 +193,6 @@ class Graph2Cut:
         prepare a part of the circuit that makes up a condition
         for a phase flip for solutions space (into "-")
         """
-        if not self.condition == "=":
-            raise NotImplementedError("other types of comparisons other than '=' are not supported yet")
 
         checker_circuit = QuantumCircuit(self.quantum_adder_register, self.ancilla_qbit_register)
         checker_circuit.barrier()
@@ -258,7 +269,7 @@ class Graph2Cut:
             return adder_subcircuits_collection, diffusion_circuit, condition_check_circuit
         raise NotImplementedError(f"optimization method {self.optimization} not implemented as valid optimization")
 
-    def construct_circuit_g(self, diffusion_iterations=3):
+    def construct_circuit_g(self, diffusion_iterations=1):
         """
         based on the iterations passed into this function, create a sequence of
         gates to be applied in the quantum circuit
@@ -278,6 +289,8 @@ class Graph2Cut:
         :param diffusion_iterations: the number of full steps to achieve probability of
             finding solutions satisfactory
         """
+        if diffusion_iterations < 1:
+            raise RuntimeError('Diffusion iteration step count cannot be lower than 1')
         self.circuit = QuantumCircuit(
             self.node_qbit_register, self.edge_qbit_register,
             self.quantum_adder_register, self.ancilla_qbit_register,
@@ -315,7 +328,7 @@ class Graph2Cut:
         self.circuit.barrier()
         self.circuit.measure(qubit=self.node_qbit_register, cbit=self.results_register)
 
-    def construct_circuit_q(self, diffusion_iterations=2):
+    def construct_circuit_q(self, diffusion_iterations=1):
         """
         this method acts the same as in "gate" optimization version.
         It constructs a circuit based on the fact, that we can save qubits from edge detection, and instead use
@@ -324,6 +337,8 @@ class Graph2Cut:
         :param diffusion_iterations: the number of oracle/diffusion calls to achieve probability of
             finding solutions satisfactory
         """
+        if diffusion_iterations < 1:
+            raise RuntimeError('Diffusion iteration step count cannot be lower than 1')
         self.circuit = QuantumCircuit(
             self.node_qbit_register,  # self.edge_qbit_register, <- this is not used here
             self.quantum_adder_register, self.ancilla_qbit_register,
@@ -390,36 +405,113 @@ class Graph2Cut:
         # figure = self.circuit.draw(output='mpl')
         # plt.show()
         job = AerSimulator().run(self.circuit, shots=shots, seed_simulator=seed_simulator)
+        self.current_job_shots = shots
         self.counts = job.result().get_counts(self.circuit)
         return self.counts
 
+    def solve(self, shots: int = None, seed_simulator: int = None, verbose: bool = None, diffusion_iterations=1):
+        """go to easy method for triggering a solver, locally on your machine"""
+        self.diffusion_steps = diffusion_iterations
+        if self.optimization == "gates":
+            self.construct_circuit_g(diffusion_iterations=diffusion_iterations)
+        elif self.optimization == "qbits":
+            self.construct_circuit_q(diffusion_iterations=diffusion_iterations)
+        self.schedule_job_locally(shots=shots, seed_simulator=seed_simulator)
+        self.solution_analysis(verbose=verbose)
+
+    def solution_analysis(self, verbose=False):
+        """
+        among given list of answers and counts related to them, search for possible answers of the given problem
+
+        here I solve this problem simply by recognizing the "step-up" in counts that possible answers receive after
+        diffusion step, by obtaining st_deviation of answer set counts and taking answers that are above 4sigma
+        distance away from the mean value
+        """
+        from statistics import stdev, mean
+        from math import sqrt, pi
+
+        if self.counts:
+            sorted_answers = sorted([(ans, self.counts[ans]) for ans in self.counts], key=lambda x: x[1])[::-1]
+            counts_mean = mean([a[1] for a in sorted_answers])
+            counts_stdev = stdev([a[1] for a in sorted_answers])
+            answer_count_noise_metric = counts_mean + 4 * counts_stdev
+
+            if verbose:
+                print('noise metric', answer_count_noise_metric)
+
+            for answer_index, (_, a_count) in enumerate(sorted_answers):
+                if answer_index == 0:
+                    continue
+                # regular case of having some bad answers and some good answers
+                # in following - reached a potential correct upper bound in the ordered set of all possible answers
+                # this works due to second check, even if the distribution is no loger "normal"
+                if a_count < answer_count_noise_metric:
+                    if sorted_answers[answer_index-1][1] > sorted_answers[answer_index][1] * 2:
+                        self.possible_answers = sorted_answers[:answer_index]
+                        self.best_rejected_answer = sorted_answers[answer_index]
+                        break
+
+            # if solution was not determined in the first case, it might be that only the valid solutions were shown
+            # with adequate number cf counts - check if the number of oracle querries was appropriate for that matter
+            if not self.possible_answers:
+                queries_metric = floor(sqrt(2**self.node_qbit_register.size/len(sorted_answers)) * pi/4)
+                if verbose:
+                    print('possible solution count', len(sorted_answers), f"example: {sorted_answers[0]}")
+                    print('queries metric', queries_metric)
+                if queries_metric - 1 <= self.diffusion_steps <= queries_metric + 1:
+                    self.possible_answers = sorted_answers
+                    self.best_rejected_answer = tuple(['', 0])
+
+            # special case of no answers will be visible by both solution and best rejected having
+            # still "None" assigned as variables.
+            self.answer_percentage = 0.0 if self.possible_answers is None or self.best_rejected_answer is None \
+                else round(sum([a[1] for a in self.possible_answers]) / self.current_job_shots, 3) * 100
+
+            if verbose:
+                # special case - no answer with current criteria
+                if not self.possible_answers and not self.best_rejected_answer:
+                    print('Could not find answers with current criteria.\nModify experiment variables if you think '
+                          'graph should yield an answer to current problem, or make sure that solution space does not '
+                          'take exactly half of the search space in your case.')
+                    return
+
+                print(f'there are potentially {len(self.possible_answers)} answers to the graph problem')
+                print(f'best rejected answer: {self.best_rejected_answer[0]}, counts: {self.best_rejected_answer[1]}')
+                # print('percent_count', sum([a[1] for a in self.possible_answers])/self.current_job_shots)
+
+                if self.answer_percentage < 2:
+                    print(f'in real scenario, without the meaningful number of shots, '
+                          f'it is possible that your experiment might not yield a correct answer. Boost number of '
+                          f'grover diffusion steps. Experiment might drown true answers in QC uncertainty '
+                          f'without any error correction mechanisms.')
+                    print('Solutions total number of counts make <2% of total experiment counts.')
+                    return
+                print(f'possible answers counts are {self.answer_percentage}% of entire experiment counts')
+                if self.answer_percentage < 30:
+                    print(f'Try running an algorithm with more optimal diffusion step count to boost '
+                          f'the total percentage of counts of possible answers to any meaningful level, '
+                          f'if this is simulation')
+
+            return
+
+        raise RuntimeError('counts not found, did you actually run algorithm?')
+
 
 if __name__ == '__main__':
-    # [('0001100111', 23637), ('0011100111', 23602), ('1100011000', 23526), ('1110011000', 23391),]
-    # 'len(e) - 2' cutting
+    from random import seed, randint
     nodes = 10
     edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
              [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 4]]
 
-    # nodes = 3
-    # edges = [(0, 1), (1, 2)]
+    # 7278 -> extra solution with 1 count
+    # 8007, 10449, 6986 -> no extra solution
+    solver_seed = randint(0, 15215)
+    print(f'{solver_seed=}')
 
     cut = Graph2Cut(nodes, edges, cuts_number=len(edges)-6, optimization="qbits")
-    # cut = Graph2Cut(nodes, edges, cuts_number=len(edges), optimization="gates")
-    cut.construct_circuit_q(diffusion_iterations=2)
-    # cut.construct_circuit_g(diffusion_iterations=1)
-    counts = cut.schedule_job_locally(shots=100000, seed_simulator=20)
-    print(sorted([(ans, counts[ans]) for ans in counts], key=lambda x: x[1])[::-1])
-    print(cut.size())
-
-    # nodes2 = 11
-    # edges2 = [*pairwise(i for i in range(nodes2))]
-    # cut2 = Graph2Cut(nodes, edges, len(edges))
-    # cut2._allocate_qbits()
-    # circuit_book2 = cut2.assemble_subcircuits()
-    # cut2.construct_circuit(diffusion_iterations=1)
-    # st = time.time()
-    # counts2 = cut2.schedule_job_locally(shots=30000)
-    # ed = time.time()
-    # print("time", ed - st)
-    # print(sorted([(ans, counts2[ans]) for ans in counts2], key=lambda x: x[1])[::-1])
+    cut.solve(shots=10000, diffusion_iterations=2, seed_simulator=solver_seed)
+    cut.solution_analysis(verbose=True)
+    print("shots", cut.current_job_shots)
+    print("answers", cut.possible_answers)
+    print("rejected", cut.best_rejected_answer)
+    print("percentage", cut.answer_percentage)

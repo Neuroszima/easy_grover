@@ -2,9 +2,9 @@ import unittest
 from collections import OrderedDict
 from itertools import pairwise
 # from pprint import pprint
-from random import shuffle, choice, seed
+from random import shuffle, choice, seed, randint
 from copy import deepcopy
-from math import floor, log2
+from math import floor, log2, sqrt, pi
 from time import time
 
 # from qiskit.circuit import CircuitInstruction
@@ -74,7 +74,12 @@ class ConstructorTester(unittest.TestCase):
         starting_edges = [(s_node, e_node) for s_node, e_node in zip(start_nodes, end_nodes)]
 
         if chain_only:
-            return all_possibilities, starting_edges
+            solution_node_sequence = [
+                (edge[0], "0" if index % 2 == 0 else "1") for index, edge in enumerate(starting_edges)
+            ]
+            solution_node_sequence += [(starting_edges[-1][1], "0" if solution_node_sequence[-1][1] == "1" else "1")]
+            solution = "".join([n[1] for n in sorted(solution_node_sequence, key=lambda x: x[0])])
+            return starting_edges, solution[::-1]
 
         # until condition is met, add another couple connections to the graph
         total_edges = deepcopy(starting_edges)
@@ -91,7 +96,7 @@ class ConstructorTester(unittest.TestCase):
             if i > all_possibilities * 3:
                 break
 
-        return all_possibilities, total_edges
+        return total_edges, None
 
     @staticmethod
     def graph_with_certain_solution(node_number) -> tuple:
@@ -169,9 +174,9 @@ class ConstructorTester(unittest.TestCase):
 
         # computational complexity for a naive approach for 12 node graph is already huge, stopping at this level
         self.increasing_size_graphs = [*range(4, 13)]
-        self.random_graphs = [(i, self.graph_constructor(i)[1]) for i in self.increasing_size_graphs]
+        self.random_graphs = [(i, self.graph_constructor(i)[0]) for i in self.increasing_size_graphs]
         self.random_chain_graphs = [
-            (i, self.graph_constructor(i, chain_only=True)[1])
+            (i, *self.graph_constructor(i, chain_only=True))
             for i in self.increasing_size_graphs
         ]
 
@@ -240,7 +245,7 @@ class ConstructorTester(unittest.TestCase):
         seed(seed_)
         # print(f"time seed for edge_detector test for chain graph: {seed_}")
         nodes = 8
-        _, chain_graph = self.graph_constructor(nodes, chain_only=True)
+        chain_graph, __ = self.graph_constructor(nodes, chain_only=True)
         graph_cutter = Graph2Cut(nodes=nodes, edge_list=chain_graph, cuts_number=len(chain_graph))
         test_circuit_book = graph_cutter.assemble_subcircuits()
         edge_checker_subcircuit = test_circuit_book[0]
@@ -322,7 +327,6 @@ class ConstructorTester(unittest.TestCase):
             self.assertEqual(correct_count, int(counts_list[0][0], base=2))
             self.assertEqual(10, counts_list[0][1])
 
-    # @unittest.skip("not implemented fully")
     def test_qbit_reuse_adder_parts(self):
         """
         test sub-circuit creating of the qbit reuse adder
@@ -388,7 +392,7 @@ class ConstructorTester(unittest.TestCase):
         """
 
     @unittest.skip("not implemented")
-    def test_chains(self):
+    def test_chains_gate_optimizer(self):
         """
         test circuit creations and functionality for special case of only 2 solutions being proper in given condition
 
@@ -428,14 +432,67 @@ class ConstructorTester(unittest.TestCase):
         test a random fully connected graph, for its bipartiteness in a given condition
         look for the most probable answer and check if it satisfies solution condition
 
-        for this test, a new method of graph creation has to be created to grant 100% chance of getting
-        at least 1 proper solution
+        for this test, a different method of graph creation is used
         """
+
+    def test_compare_methods(self):
+        """
+        compare both optimizations to check if they yield the same answers (counts may vary)
+
+        compared methods will only be checked in this test for graphs with less or equal to 7 nodes.
+        This is due to RAM requirements of "gate" optimizer using a lot more qbits thus matrix is very large.
+        """
+        # create a series of randomized graphs, from complexity of 4 up to 7 nodes, in series.
+        graph_seed = randint(0, 100000)
+        seed(graph_seed)
+        graphs = [(nodes, self.graph_constructor(nodes)) for nodes in range(4, 8)]
+        shots = 10000
+        seed_simulator = randint(0, 100000)
+
+        for nodes, (edge_list, _) in graphs:
+            gate_optimized_solver = Graph2Cut(
+                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list), optimization='gates')
+            qbit_optimized_solver = Graph2Cut(
+                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list), optimization='qbits')
+            gate_optimized_solver.solve(shots=shots, seed_simulator=seed_simulator)
+            qbit_optimized_solver.solve(shots=shots, seed_simulator=seed_simulator)
+
+            if gate_optimized_solver.possible_answers is None or qbit_optimized_solver.possible_answers is None:
+                assert (gate_optimized_solver.possible_answers is None
+                        and qbit_optimized_solver.possible_answers is None), \
+                    f"both possible answer variables should be None, graph seed: {graph_seed}, " \
+                    f"exp. seed {seed_simulator}"
+                continue
+
+            q_answers = [a[0] for a in gate_optimized_solver.possible_answers]
+            g_answers = [a[0] for a in qbit_optimized_solver.possible_answers]
+            assert q_answers == g_answers, f"answers do not match for experiment seed {seed_simulator} " \
+                                           f"in compare methods, graph seed: {graph_seed}"
+
+    def test_errors(self):
+        """
+        test program for running correctness
+        """
+        rand_chars = 'abcdefghijAFWOPRVZ120987'
+        unsupported_operands = ["<", ">", ">=", "<="]
+        nodes = 3
+        edges = [(0, 1), (1, 2)]
+        # (nodes, edges, )
+        self.assertRaises(NotImplementedError, Graph2Cut, *[nodes, edges],
+                          optimization=''.join([choice(rand_chars) for _ in range(11)]))
+        for condition in unsupported_operands:
+            self.assertRaises(NotImplementedError, Graph2Cut, *[nodes, edges],
+                              condition=condition)
+
+        cut = Graph2Cut(nodes, edges)
+        self.assertRaises(RuntimeError, cut.solution_analysis)  # no counts because no experiment was run
+        self.assertRaises(RuntimeError, cut.solve, diffusion_iterations=randint(-12580120, -1))
+        self.assertRaises(RuntimeError, cut.solve, diffusion_iterations=0)
+        self.assertRaises(RuntimeError, cut.construct_circuit_q, diffusion_iterations=0)
+        self.assertRaises(RuntimeError, cut.construct_circuit_q, diffusion_iterations=randint(-12580120, -1))
+        self.assertRaises(RuntimeError, cut.construct_circuit_g, diffusion_iterations=0)
+        self.assertRaises(RuntimeError, cut.construct_circuit_g, diffusion_iterations=randint(-12580120, -1))
 
 
 if __name__ == '__main__':
-    # for i in range(4, 15):
-    #     possibilities, edges_chosen = graph_constructor(i)
-    #     print(i, possibilities, f"edge_statistic {len(edges_chosen) / possibilities}")
-    #     print(len(edges_chosen), edges_chosen[:int(len(edges_chosen) * 0.75)], "...")
     unittest.main()
