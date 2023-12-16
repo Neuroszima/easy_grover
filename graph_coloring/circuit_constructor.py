@@ -452,15 +452,15 @@ class Graph2Cut:
                         break
 
             # if solution was not determined in the first case, it might be that only the valid solutions were shown
-            # with adequate number cf counts - check if the number of oracle querries was appropriate for that matter
-            if not self.possible_answers:
-                queries_metric = floor(sqrt(2**self.node_qbit_register.size/len(sorted_answers)) * pi/4)
-                if verbose:
-                    print('possible solution count', len(sorted_answers), f"example: {sorted_answers[0]}")
-                    print('queries metric', queries_metric)
-                if queries_metric - 1 <= self.diffusion_steps <= queries_metric + 1:
-                    self.possible_answers = sorted_answers
-                    self.best_rejected_answer = tuple(['', 0])
+            # with adequate number cf counts - check if the number of oracle queries was appropriate for that matter
+            if not self.possible_answers and self.condition == "=":
+                # among all possibilities, a total number of solutions for a given number of cuts will not happen to
+                # exceed half of the entire search space. (1/2 embedded as "-1" of the power-of-two calc.)
+                if len(sorted_answers) < 2**(self.node_qbit_register.size-1):
+                    queries_metric = floor(sqrt(2**self.node_qbit_register.size/len(sorted_answers)) * pi/4)
+                    if queries_metric - 1 <= self.diffusion_steps <= queries_metric + 1:
+                        self.possible_answers = sorted_answers
+                        self.best_rejected_answer = tuple(['', 0])
 
             # special case of no answers will be visible by both solution and best rejected having
             # still "None" assigned as variables.

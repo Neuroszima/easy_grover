@@ -1,6 +1,7 @@
 import unittest
 from collections import OrderedDict
 from itertools import pairwise
+from pprint import pprint
 # from pprint import pprint
 from random import shuffle, choice, seed, randint
 from copy import deepcopy
@@ -96,6 +97,7 @@ class ConstructorTester(unittest.TestCase):
             if i > all_possibilities * 3:
                 break
 
+        # here solution does not matter that much, so "None" is ok
         return total_edges, None
 
     @staticmethod
@@ -157,11 +159,79 @@ class ConstructorTester(unittest.TestCase):
 
         return valid_solution_str, total_edges
 
-    def prepare_circuit_measurements(self, tested_circuit: QuantumCircuit, shots=10):
+    @staticmethod
+    def check_bipartiteness(nodes, edge_list):
+        """deterministic method to check if full bipartiteness exists for a graph"""
+        node_dict: dict[int, dict] = dict()
+
+        # make a simple dictionary with connections. For every node, list all connected nodes.
+        for n in range(nodes):
+            node_dict[n] = {"color": None,
+                            "checked": False,
+                            "connection_list": []}
+
+        for e in edge_list:
+            node_dict[e[0]]["connection_list"].append(e[1])
+            node_dict[e[1]]["connection_list"].append(e[0])
+
+        current_node = 0
+        node_dict[current_node]["color"] = 0
+        graph_check_path = [current_node]
+        colored_number = 1
+        i = 0
+        while colored_number <= nodes:
+            jump_to_next_node = False
+            i += 1
+            if i > 100:
+                break
+
+            # if we didn't check all adjacent connections, color all of the edges in different color, or check if
+            # there is any already applied
+            if not node_dict[current_node]["checked"]:
+                for node in node_dict[current_node]["connection_list"]:
+                    # apply color to adjacent node. If there is, check if it is not wrong.
+                    if node_dict[node]["color"] is None:
+                        node_dict[node]["color"] = 0 if node_dict[current_node]["color"] == 1 else 1
+                        colored_number += 1
+                    if node_dict[node]["color"] == node_dict[current_node]["color"]:
+                        # if it is wrong, exit and say there is no bipartiteness for this graph
+                        return False, ""
+                # all the connections were checked so we mark as done
+                node_dict[current_node]["checked"] = True
+
+            # after checking, determine where to jump next
+            for node in node_dict[current_node]["connection_list"]:
+                # were we already in that node? if yes, do not jump there
+                if not node_dict[node]["checked"]:
+                    # unchecked node
+                    current_node = node
+                    graph_check_path.append(current_node)
+                    jump_to_next_node = True
+                    break
+
+            # either continue from the next point of interest, or
+            if jump_to_next_node:
+                # print(f"{node_dict[graph_check_path[-2]]=} fully checked, jumping into {current_node}")
+                continue
+            else:
+                graph_check_path.pop()
+                if graph_check_path == []:
+                    break
+                current_node = graph_check_path[-1]
+                # print(f"backing off into {current_node}")
+
+        for edge in edge_list:
+            if node_dict[edge[0]]["color"] == node_dict[edge[1]]["color"]:
+                return False, ""
+
+        return True, "".join([str(node_dict[n]["color"]) for n in range(nodes)])
+
+    @staticmethod
+    def prepare_circuit_measurements(tested_circuit: QuantumCircuit, shots=10, experiment_seed=None):
         """perform circuit simulation from tested circuit"""
         # simulation methods = ('automatic', 'statevector', 'density_matrix', 'stabilizer',
         # 'matrix_product_state', 'extended_stabilizer', 'unitary', 'superop')
-        job = AerSimulator().run(tested_circuit, shots=shots, method='automatic')
+        job = AerSimulator().run(tested_circuit, shots=shots, method='automatic', seed_simulator=experiment_seed)
         counts = job.result().get_counts()
         counts_list = [(measurement, counts[measurement]) for measurement in counts]
         return counts_list
@@ -172,13 +242,34 @@ class ConstructorTester(unittest.TestCase):
         self.cuts = 2
         self.end_condition = "="
 
-        # computational complexity for a naive approach for 12 node graph is already huge, stopping at this level
-        self.increasing_size_graphs = [*range(4, 13)]
-        self.random_graphs = [(i, self.graph_constructor(i)[0]) for i in self.increasing_size_graphs]
+        # computational complexity for a naive approach for 9 node graph is already huge for test
+        # automation purposes, stopping at this level
+        # some tests will have dedicated graph making
+        self.graph_seed = randint(0, 1500000)
+        self.seed_simulator = randint(0, 1500000)
+        self.shots = 10000
+        self.increasing_size_graphs = [*range(4, 10)]
+        seed(self.graph_seed)
+        self.random_graphs_ = [
+            (node_count, *self.graph_constructor(node_count)) for node_count in self.increasing_size_graphs]
         self.random_chain_graphs = [
-            (i, *self.graph_constructor(i, chain_only=True))
-            for i in self.increasing_size_graphs
+            (node_count, *self.graph_constructor(node_count, chain_only=True))
+            for node_count in self.increasing_size_graphs
         ]
+
+        # create a series of randomized graphs, from complexity of 4 up to 7 nodes, in series.
+        # self.random_graphs_ = [(nodes, *self.graph_constructor(nodes)) for nodes in range(4, 8)]
+
+    def test_deterministic_graph_solver(self):
+
+        solution, edges = self.graph_with_certain_solution(10)
+        # print(f"{self.graph_seed}")
+        # print(solution, edges)
+        answer, solution_ = self.check_bipartiteness(10, edges)
+        # print(answer, solution_)
+        mirrored_solution = "".join(["1" if c == "0" else "0" for c in solution_])
+        assert (solution_ == solution) or (mirrored_solution == solution), f"solution not found - " \
+                                                                           f"graph seed {self.graph_seed}"
 
     def test_adder_size(self):
         """
@@ -196,7 +287,7 @@ class ConstructorTester(unittest.TestCase):
         test_circuit_builder._allocate_qbits()
         self.assertEqual(len(test_circuit_builder.quantum_adder_register), 2)
 
-        for graph in self.random_graphs:
+        for graph in self.random_graphs_:
             test_circuit_builder2 = Graph2Cut(
                 graph[0], graph[1],
                 cuts_number=len(graph[1]), condition=self.end_condition
@@ -218,8 +309,7 @@ class ConstructorTester(unittest.TestCase):
         test qbit/cbit registers being properly allocated for a graph structure that
         only consist a single chain of edges (no other interconnections)
         """
-        for graph in self.random_chain_graphs:
-            nodes, edges = graph
+        for nodes, edges, _ in self.random_chain_graphs:
             test_circuit_builder = Graph2Cut(nodes, edge_list=edges, cuts_number=len(edges), condition='=')
             test_circuit_builder._allocate_qbits()
             self.assertEqual(len(test_circuit_builder.quantum_adder_register), floor(log2(nodes-1))+1)
@@ -270,7 +360,7 @@ class ConstructorTester(unittest.TestCase):
         test_circuit.compose(edge_checker_subcircuit, inplace=True)
         test_circuit.compose(measurement_circuit, graph_cutter.edge_qbit_register, inplace=True)
 
-        counts_list = self.prepare_circuit_measurements(test_circuit)
+        counts_list = self.prepare_circuit_measurements(test_circuit, experiment_seed=self.seed_simulator)
         self.assertEqual(counts_list[0][0], "".join(['1' for _ in range(graph_cutter.edge_qbit_register.size)]))
         self.assertEqual(counts_list[0][1], 10)
 
@@ -282,13 +372,10 @@ class ConstructorTester(unittest.TestCase):
         """
         # here we just use
         # 1 - node color mismatch -> a cut; 0 - node color matching -> no cut
-        # seed_ = time()
-        seed_ = 1700216428.893547
+        seed_ = time()
         seed(seed_)
-        # print(f"time seed for test_adder: {seed_}")
-        random_graph = self.random_graphs[4]
-
-        nodes, edges = random_graph
+        random_graph = self.random_graphs_[4]
+        nodes, edges, _ = random_graph
         graph_cutter = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges))
         sub_circuit_book = graph_cutter.assemble_subcircuits()
         adder_circuit = sub_circuit_book[1]
@@ -300,7 +387,6 @@ class ConstructorTester(unittest.TestCase):
             # random 10 cases that should simulate some random inputs into the graph
             *["".join([choice(["0", "1"]) for _ in range(graph_cutter.edge_qbit_register.size)]) for __ in range(10)]
         ]
-        # print(test_cases)
 
         for case in test_cases:
             correct_count = sum([int(c == "1") for c in case])
@@ -320,10 +406,7 @@ class ConstructorTester(unittest.TestCase):
 
             test_circuit.compose(adder_circuit, inplace=True)
             test_circuit.compose(measurement_circuit, graph_cutter.quantum_adder_register, inplace=True)
-            counts_list = self.prepare_circuit_measurements(test_circuit)
-            # print(counts_list)
-            # break
-            # print(case, counts_list)
+            counts_list = self.prepare_circuit_measurements(test_circuit, experiment_seed=self.seed_simulator)
             self.assertEqual(correct_count, int(counts_list[0][0], base=2))
             self.assertEqual(10, counts_list[0][1])
 
@@ -338,15 +421,14 @@ class ConstructorTester(unittest.TestCase):
         # seed_ = 1700216428.893547
         seed(seed_)
         # print(f"time seed for test_qbit_reuse_adder: {seed_}")
-        random_graph = self.random_chain_graphs[4]
+        graph = self.random_chain_graphs[4]
 
-        nodes, edges = random_graph
-        graph_cutter = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges), optimization='qbits')
+        graph_cutter = Graph2Cut(nodes=graph[0], edge_list=graph[1], cuts_number=len(graph[1]), optimization='qbits')
         sub_circuit_book = graph_cutter.assemble_subcircuits()
-        edge_counting_subcircuits: list[QuantumCircuit] = sub_circuit_book[0]
+        edge_counting_subcircuits: list[list[int | QuantumCircuit | ...]] = sub_circuit_book[0]
         test_cases = ["00", "01", "10", "11"]
 
-        self.assertEqual(len(edges), len(edge_counting_subcircuits))
+        self.assertEqual(len(graph[1]), len(edge_counting_subcircuits))
 
         # structure of any sub-circuit in this solution should be - check, addition_pyramid, check_reverse
         # entire array of sub-circuits should make up for an addition mechanism that uses only a single ancilla and no
@@ -354,7 +436,8 @@ class ConstructorTester(unittest.TestCase):
 
         # construct a list of tuples which represent qbits used in each gate that is a part of every sub-circuit
         # when its made. This way we make sure that gates are made up from correct pieces within sub-circuits
-        for edge_index, (subcircuit, edge) in enumerate(zip(edge_counting_subcircuits, edges)):
+        for edge_index, edge, subcircuit in edge_counting_subcircuits:
+            subcircuit: QuantumCircuit
             all_ops: OrderedDict = subcircuit.count_ops()
             # print(f'\nnext sub-circuit: {edge}, {edge_index}')
             predicted_instruction_subregisters = self.instruction_usage_qbits(graph_cutter, edge, edge_index)
@@ -373,10 +456,9 @@ class ConstructorTester(unittest.TestCase):
             # by popping from the original list, the copies of exact tuples that have exact same contents, we
             # make sure that every gate has appeared exact number of times that we want sub-circuit to be made from
 
-            # If any mismatch will happen, in this test, we either create too much gates, too many Qubits are used, or
+            # Shall any mismatch happen, in this test, we either create too much gates, too many Qubits are used, or
             # too little gates are created. Either way we will notice by the contents of the list checked, or the test
-            # will result in an error prior to the assert
-
+            # will result in an error earlier during test
             self.assertEqual(predicted_instruction_subregisters, [])
 
     @unittest.skip("not implemented")
@@ -391,7 +473,6 @@ class ConstructorTester(unittest.TestCase):
         test if 'inversion by the mean' really works for given solutions
         """
 
-    @unittest.skip("not implemented")
     def test_chains_gate_optimizer(self):
         """
         test circuit creations and functionality for special case of only 2 solutions being proper in given condition
@@ -402,6 +483,55 @@ class ConstructorTester(unittest.TestCase):
         ...-1-0-1-0-1-0-1-0-... and ...-0-1-0-1-0-1-0-1-...
         meaning solutions have to compliment each other and being a sequences of interleaved 0's and 1's
         """
+        # in following case, for the gate optimizer, only a chain of up to length 10 will be used for testing,
+        # since larger chains are too intensive on memory (26 qb -> ~1.8 GB RAM)
+        assertion_error_message_1 = f"solution not found in set of answers, " \
+                                    f"g_seed: {self.graph_seed}, s_seed: {self.seed_simulator}"
+        assertion_error_message_2 = f"solution is cut.counts has too little counts..., " \
+                                    f"g_seed: {self.graph_seed}, s_seed: {self.seed_simulator}"
+
+        chains = [(node_count, *self.graph_constructor(node_number=node_count, chain_only=True))
+                  for node_count in range(5, 11)]
+
+        for node_count, edges, solution in chains:
+            maximum_bipartiteness_diffusion_count = floor(pi / 4 * sqrt(2 ** node_count / 2))
+            cut = Graph2Cut(node_count, edge_list=edges, cuts_number=len(edges), optimization="gates")
+            cut.construct_circuit_g(diffusion_iterations=maximum_bipartiteness_diffusion_count)
+            cut.schedule_job_locally(seed_simulator=self.seed_simulator)
+            # print(cut.counts, cut.size())
+            # print("proposed solution", solution)
+            # print("diffusion count", maximum_bipartiteness_diffusion_count)
+            self.assertIn(solution, cut.counts, msg=assertion_error_message_1)
+            self.assertGreater(cut.counts[solution], 300, msg=assertion_error_message_2)
+
+    def test_chains_qbit_optimizer(self):
+        """
+        test circuit creations and functionality for special case of only 2 solutions being proper in given condition
+
+        there are chains given in this task:
+        ...-o-o-o-o-o-o-o-o-...
+        which yield only 2 possible solutions of max bipartiteness, being:
+        ...-1-0-1-0-1-0-1-0-... and ...-0-1-0-1-0-1-0-1-...
+        meaning solutions have to compliment each other and being a sequences of interleaved 0's and 1's
+        """
+        # in following case, for the qbit optimizer, we can go as high as chain of length 16 - there
+        # should be around 22 qbits used to emulate this. The calculation is long because of the high number of
+        # diffusion cycles
+        assertion_error_message_1 = f"solution not found in set of answers, " \
+                                    f"g_seed: {self.graph_seed}, s_seed: {self.seed_simulator}"
+        assertion_error_message_2 = f"solution is cut.counts has too little counts..., " \
+                                    f"g_seed: {self.graph_seed}, s_seed: {self.seed_simulator}"
+
+        chains = [(node_count, *self.graph_constructor(node_number=node_count, chain_only=True))
+                  for node_count in range(5, 17)]
+
+        for node_count, edges, solution in chains:
+            maximum_bipartiteness_diffusion_count = floor(pi/4 * sqrt(2**node_count/2))
+            cut = Graph2Cut(node_count, edge_list=edges, cuts_number=len(edges), optimization="qbits")
+            cut.construct_circuit_q(diffusion_iterations=maximum_bipartiteness_diffusion_count)
+            cut.schedule_job_locally(seed_simulator=self.seed_simulator)
+            self.assertIn(solution, cut.counts, msg=assertion_error_message_1)
+            self.assertGreater(cut.counts[solution], 300, msg=assertion_error_message_2)
 
     @unittest.skip("not implemented")
     def test_simple_rings(self):
@@ -441,33 +571,39 @@ class ConstructorTester(unittest.TestCase):
 
         compared methods will only be checked in this test for graphs with less or equal to 7 nodes.
         This is due to RAM requirements of "gate" optimizer using a lot more qbits thus matrix is very large.
-        """
-        # create a series of randomized graphs, from complexity of 4 up to 7 nodes, in series.
-        graph_seed = randint(0, 100000)
-        seed(graph_seed)
-        graphs = [(nodes, self.graph_constructor(nodes)) for nodes in range(4, 8)]
-        shots = 10000
-        seed_simulator = randint(0, 100000)
 
-        for nodes, (edge_list, _) in graphs:
+        Modification of this test comes down to removing excess edge connections if total number of qubits could
+        exceed 25 or so. We leave `cuts_number` to allow for 2 connections in a graph for solutions to actually appear
+        from time to time in random graphs.
+        """
+
+        for nodes, edge_list, _ in self.random_graphs_:
+            if nodes + len(edge_list) + 3 + floor(log2(len(edge_list))) > 25:
+                to_pop = nodes + len(edge_list) + floor(log2(len(edge_list))) - 23
+                for _ in range(to_pop):
+                    edge_list.pop()
+            # print(nodes, edge_list)
             gate_optimized_solver = Graph2Cut(
-                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list), optimization='gates')
+                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list)-2, optimization='gates')
             qbit_optimized_solver = Graph2Cut(
-                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list), optimization='qbits')
-            gate_optimized_solver.solve(shots=shots, seed_simulator=seed_simulator)
-            qbit_optimized_solver.solve(shots=shots, seed_simulator=seed_simulator)
+                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list)-2, optimization='qbits')
+            # print(gate_optimized_solver.size())
+            # print(qbit_optimized_solver.size())
+            gate_optimized_solver.solve(shots=self.shots, seed_simulator=self.seed_simulator)
+            qbit_optimized_solver.solve(shots=self.shots, seed_simulator=self.seed_simulator)
 
             if gate_optimized_solver.possible_answers is None or qbit_optimized_solver.possible_answers is None:
                 assert (gate_optimized_solver.possible_answers is None
                         and qbit_optimized_solver.possible_answers is None), \
-                    f"both possible answer variables should be None, graph seed: {graph_seed}, " \
-                    f"exp. seed {seed_simulator}"
+                    f"both possible answer variables should be None, graph seed: {self.graph_seed}, " \
+                    f"exp. seed {self.seed_simulator}"
                 continue
 
             q_answers = [a[0] for a in gate_optimized_solver.possible_answers]
             g_answers = [a[0] for a in qbit_optimized_solver.possible_answers]
-            assert q_answers == g_answers, f"answers do not match for experiment seed {seed_simulator} " \
-                                           f"in compare methods, graph seed: {graph_seed}"
+            # print(q_answers, g_answers)
+            assert q_answers == g_answers, f"answers do not match for experiment seed {self.seed_simulator} " \
+                                           f"in compare methods, graph seed: {self.graph_seed}"
 
     def test_errors(self):
         """
