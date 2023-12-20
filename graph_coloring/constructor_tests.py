@@ -59,7 +59,6 @@ class ConstructorTester(unittest.TestCase):
         then adds different edges to make a graph appear more interconnected than it starts from, looking
         back if there is no repeat among already connected edges.
 
-        makes ~65-68% of possible interconnects in a graph with selected number of nodes
 
         :param chain_only: a check that forces a graph to only include single chain of all nodes connected
         :return: tuple -> (number of possible edges, list of edges representing graph structure)
@@ -108,9 +107,11 @@ class ConstructorTester(unittest.TestCase):
 
         then throw in a couple additional valid edges to test the solution for full graph split
 
+        solution is written in reverse order in order to comply to ordering in circuit solver and qiskit notation
+
         :param node_number: a total number of nodes to be in a graph structure
-        :return: tuple -> (valid solution -> string of 0's and 1's which should appear among solutions,
-            list of edges representing graph structure)
+        :return: tuple -> (list of edges representing graph structure,
+            valid solution -> string of 0's and 1's which should appear among solutions)
         """
         all_possibilities = sum([*range(1, node_number)])
         nodes = [i for i in range(node_number)]
@@ -157,7 +158,22 @@ class ConstructorTester(unittest.TestCase):
             if i > all_possibilities:
                 break
 
-        return valid_solution_str, total_edges
+        return total_edges, valid_solution_str[::-1]
+
+    def graph_with_no_solution(self, node_number):
+        """mess up a normally bipartite graph by including an extra edge into graph structure"""
+        edges, str_solution = self.graph_with_certain_solution(node_number)
+        str_solution: str
+
+        str_solution = str_solution[::-1]
+        print(str_solution)
+        index_0 = str_solution.index('0')
+        print("index_0", index_0)
+        another_index_0 = str_solution[index_0+1:].index('0') + index_0 + 1
+        print(f"{another_index_0=}")
+        # index_1 = str_solution[::-1].index('1')
+        edges.append(tuple([index_0, another_index_0]))
+        return edges, None
 
     @staticmethod
     def check_bipartiteness(nodes, edge_list):
@@ -215,7 +231,7 @@ class ConstructorTester(unittest.TestCase):
                 continue
             else:
                 graph_check_path.pop()
-                if graph_check_path == []:
+                if not graph_check_path:
                     break
                 current_node = graph_check_path[-1]
                 # print(f"backing off into {current_node}")
@@ -224,7 +240,7 @@ class ConstructorTester(unittest.TestCase):
             if node_dict[edge[0]]["color"] == node_dict[edge[1]]["color"]:
                 return False, ""
 
-        return True, "".join([str(node_dict[n]["color"]) for n in range(nodes)])
+        return True, "".join([str(node_dict[n]["color"]) for n in range(nodes)])[::-1]
 
     @staticmethod
     def prepare_circuit_measurements(tested_circuit: QuantumCircuit, shots=10, experiment_seed=None):
@@ -247,6 +263,7 @@ class ConstructorTester(unittest.TestCase):
         # some tests will have dedicated graph making
         self.graph_seed = randint(0, 1500000)
         self.seed_simulator = randint(0, 1500000)
+        self.seeds = f"{self.graph_seed=}, {self.seed_simulator=}" # for error printing
         self.shots = 10000
         self.increasing_size_graphs = [*range(4, 10)]
         seed(self.graph_seed)
@@ -256,20 +273,28 @@ class ConstructorTester(unittest.TestCase):
             (node_count, *self.graph_constructor(node_count, chain_only=True))
             for node_count in self.increasing_size_graphs
         ]
+        self.certain_solution_graphs = [
+            (node_count, *self.graph_with_certain_solution(node_count))
+            for node_count in self.increasing_size_graphs
+        ]
+        self.no_direct_solution_graphs = [
+            (node_count, *self.graph_with_no_solution(node_count))
+            for node_count in self.increasing_size_graphs
+        ]
 
         # create a series of randomized graphs, from complexity of 4 up to 7 nodes, in series.
         # self.random_graphs_ = [(nodes, *self.graph_constructor(nodes)) for nodes in range(4, 8)]
 
     def test_deterministic_graph_solver(self):
-
-        solution, edges = self.graph_with_certain_solution(10)
-        # print(f"{self.graph_seed}")
-        # print(solution, edges)
-        answer, solution_ = self.check_bipartiteness(10, edges)
-        # print(answer, solution_)
-        mirrored_solution = "".join(["1" if c == "0" else "0" for c in solution_])
-        assert (solution_ == solution) or (mirrored_solution == solution), f"solution not found - " \
-                                                                           f"graph seed {self.graph_seed}"
+        """test if solver works properly"""
+        for node_count, edges, solution in self.certain_solution_graphs:
+            answer, check_solution = self.check_bipartiteness(node_count, edges)
+            mirrored_solution = ''.join(["0" if c == "1" else "1" for c in check_solution])
+            self.assertEqual(answer, True)
+            self.assertIn(solution, [check_solution, mirrored_solution])
+        for node_count, edges, _ in self.no_direct_solution_graphs:
+            answer, check_solution = self.check_bipartiteness(node_count, edges)
+            self.assertEqual(answer, False)
 
     def test_adder_size(self):
         """
@@ -551,19 +576,49 @@ class ConstructorTester(unittest.TestCase):
         even number of nodes will yield full cut solution similar to a chain case
 
         odd number of nodes will yield a couple of mirrored solutions if we allow 1 edge not to be cut
-        even number of nodes will yield a lot of solutions if we allow 1 edge not to be cut
+        even number of nodes will yield no solutions if we allow 1 edge not to be cut
 
         based on this we could create a test to check if automated circuit creation works properly
         """
 
-    @unittest.skip("not implemented")
     def test_random_graph(self):
         """
         test a random fully connected graph, for its bipartiteness in a given condition
         look for the most probable answer and check if it satisfies solution condition
 
         for this test, a different method of graph creation is used
+        for this test, qbit optimizer is used, as it is faster to yield answers
         """
+        exception_incorrect_num = f"incorrect number of possible solutions, "
+        exception_not_in_solutions = "%s not in possible solutions: %s, "
+
+        for nodes, edge_list, solution in self.certain_solution_graphs:
+            diffusions = floor(sqrt(2**nodes/2) * pi/4)
+            print(nodes, edge_list, solution, diffusions)
+            solver = Graph2Cut(nodes, edge_list=edge_list, optimization="qbits")
+            solver.solve(shots=1000, seed_simulator=self.seed_simulator, diffusion_iterations=diffusions)
+            solver.solution_analysis()
+            solutions = [a[0] for a in solver.possible_answers]
+            print(solver.possible_answers)
+            self.assertIn(solution, solutions, msg=exception_not_in_solutions.format(solution, solutions) + self.seeds)
+            self.assertEqual(len(solver.possible_answers), 2,msg=exception_incorrect_num + self.seeds)
+
+        for nodes, edge_list, __ in self.random_graphs_:
+            if nodes > 6:
+                diffusions = 4
+            else:
+                diffusions = 2
+            answer, solution = self.check_bipartiteness(nodes, edge_list)
+            solver = Graph2Cut(nodes, edge_list, optimization="qbits")
+            solver.solve(shots=1000, seed_simulator=self.seed_simulator, diffusion_iterations=diffusions)
+            solver.solution_analysis()
+            if not answer:
+                print('solution not found')
+                self.assertIs(solver.possible_answers, None)
+            else:
+                print(f'solution found: {solution} {solver.possible_answers}')
+                self.assertEqual(len(solver.possible_answers), 2)
+                self.assertIn(solution, [a[0] for a in solver.possible_answers])
 
     def test_compare_methods(self):
         """
@@ -576,7 +631,6 @@ class ConstructorTester(unittest.TestCase):
         exceed 25 or so. We leave `cuts_number` to allow for 2 connections in a graph for solutions to actually appear
         from time to time in random graphs.
         """
-
         for nodes, edge_list, _ in self.random_graphs_:
             if nodes + len(edge_list) + 3 + floor(log2(len(edge_list))) > 25:
                 to_pop = nodes + len(edge_list) + floor(log2(len(edge_list))) - 23
@@ -624,6 +678,9 @@ class ConstructorTester(unittest.TestCase):
         self.assertRaises(RuntimeError, cut.solution_analysis)  # no counts because no experiment was run
         self.assertRaises(RuntimeError, cut.solve, diffusion_iterations=randint(-12580120, -1))
         self.assertRaises(RuntimeError, cut.solve, diffusion_iterations=0)
+        self.assertRaises(RuntimeError, cut.solve, shots=None)
+        self.assertRaises(RuntimeError, cut.solve, shots=randint(-12412549, -1))
+        self.assertRaises(RuntimeError, cut.solve, shots=0)
         self.assertRaises(RuntimeError, cut.construct_circuit_q, diffusion_iterations=0)
         self.assertRaises(RuntimeError, cut.construct_circuit_q, diffusion_iterations=randint(-12580120, -1))
         self.assertRaises(RuntimeError, cut.construct_circuit_g, diffusion_iterations=0)
