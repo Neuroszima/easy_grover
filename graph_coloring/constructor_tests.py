@@ -592,6 +592,9 @@ class ConstructorTester(unittest.TestCase):
         exception_incorrect_num = f"incorrect number of possible solutions, "
         exception_not_in_solutions = "%s not in possible solutions: %s, "
 
+        # self.graph_seed = 1323411,
+        # self.seed_simulator = 637265
+
         for nodes, edge_list, solution in self.certain_solution_graphs:
             diffusions = floor(sqrt(2**nodes/2) * pi/4)
             print(nodes, edge_list, solution, diffusions)
@@ -601,7 +604,7 @@ class ConstructorTester(unittest.TestCase):
             solutions = [a[0] for a in solver.possible_answers]
             print(solver.possible_answers)
             self.assertIn(solution, solutions, msg=exception_not_in_solutions.format(solution, solutions) + self.seeds)
-            self.assertEqual(len(solver.possible_answers), 2,msg=exception_incorrect_num + self.seeds)
+            self.assertEqual(len(solver.possible_answers), 2, msg=exception_incorrect_num + self.seeds)
 
         for nodes, edge_list, __ in self.random_graphs_:
             if nodes > 6:

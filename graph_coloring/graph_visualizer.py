@@ -1,29 +1,33 @@
-from math import ceil, sqrt
-from random import random
-from typing import Optional
+from math import ceil, sqrt, sin, cos, pi
+# from random import random
+from typing import Optional, Any, Dict
 
-from tkinter import Tk
+import tkinter
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes._axes import Axes
+from matplotlib.lines import Line2D
 from matplotlib.patches import Circle
+from matplotlib.spines import Spine
 from matplotlib.text import Text
 from circuit_constructor import Graph2Cut
 
 DIM_TYPE = list[int, int] | tuple[int, int]
 SCALE_TYPE = list[float, float] | tuple[float, float]
+plt.rcParams['font.family'] = 'monospace'
 
-root = Tk()
-MM_TO_INCH = 10/25.4
-SCREEN_WIDTH = root.winfo_screenwidth()
-SCREEN_WIDTH_MM = root.winfo_screenmmwidth()
-SCREEN_WIDTH_INCH = SCREEN_WIDTH_MM * MM_TO_INCH
-SCREEN_HEIGHT = root.winfo_screenheight()
-SCREEN_HEIGHT_MM = root.winfo_screenmmheight()
-SCREEN_HEIGHT_INCH = SCREEN_HEIGHT_MM * MM_TO_INCH
-root.quit()
-del root
-print(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_HEIGHT_MM, SCREEN_WIDTH_MM)
+# root = Tk()
+# MM_TO_INCH = 10/25.4
+# SCREEN_WIDTH = root.winfo_screenwidth()
+# SCREEN_WIDTH_MM = root.winfo_screenmmwidth()
+# SCREEN_WIDTH_INCH = SCREEN_WIDTH_MM * MM_TO_INCH
+# SCREEN_HEIGHT = root.winfo_screenheight()
+# SCREEN_HEIGHT_MM = root.winfo_screenmmheight()
+# SCREEN_HEIGHT_INCH = SCREEN_HEIGHT_MM * MM_TO_INCH
+# Tk().quit()
+# root.quit()
+# del root
+# print(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_HEIGHT_MM, SCREEN_WIDTH_MM)
 
 
 def rgb_to_matlab(r, g, b) -> tuple:
@@ -52,14 +56,16 @@ class Graph2CutVisualizer:
             self.nodes = graph_solver.graph_nodes
             self.edges = graph_solver.edge_list
             self.solutions = [s for s in graph_solver.counts]
+            self.cuts = graph_solver.cuts_number
         else:
             raise ValueError("Neither nodes accompanying list of edges, nor a graph solver instance has been "
                              "passed. Cannot initialize visualizer.")
         self.graph_image_size: DIM_TYPE = [1000, 1000]
         self.screen_diagonal = 23
         self.inner_outer_scale_edge = 0.25
-        self.node_radius = 30
-        self.edge_length = 20
+        self.node_radius = 10
+        self.edge_length = 75
+        self.free_drawing_space = 50
 
     @property
     def inner_graph_area(self):
@@ -76,16 +82,16 @@ class Graph2CutVisualizer:
         """same as left outer area, sets"""
         return [1-self.inner_outer_scale_edge, 1]
 
-    @property
-    def graph_image_size_inches(self):
-        """
-        gets inch representation of an image size when, originally, one chose width/height in pixels
-        helper property to convert into matplotlib-friendly figure values.
-        """
-        return (
-            self.graph_image_size[0] / SCREEN_WIDTH * SCREEN_WIDTH_INCH,
-            self.graph_image_size[1] / SCREEN_HEIGHT * SCREEN_HEIGHT_INCH
-        )
+    # @property
+    # def graph_image_size_inches(self):
+    #     """
+    #     gets inch representation of an image size when, originally, one chose width/height in pixels
+    #     helper property to convert into matplotlib-friendly figure values.
+    #     """
+    #     return (
+    #         self.graph_image_size[0] / SCREEN_WIDTH * SCREEN_WIDTH_INCH,
+    #         self.graph_image_size[1] / SCREEN_HEIGHT * SCREEN_HEIGHT_INCH
+    #     )
 
     @staticmethod
     def flatten_once(arr: list):
@@ -100,122 +106,238 @@ class Graph2CutVisualizer:
         """calculate distance between the points"""
         return sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
 
-    def show_chunk_placements(self, content_map: dict):
-        """helper method to evaluate planned placements, prior to drawing actual nodes"""
-        fig, ax = plt.subplots(figsize=self.graph_image_size_inches)
-        fig: Figure
-        ax: Axes
-        # for each part that would contain a piece of content, draw circle and text with number of nodes in it
-        # the smaller the circle the fewer nodes it represents
-        # keyword list: "contents" (list[list]), "coordinates" (x,y), "position": (inner, outer)
+    def spread_surrounding_nodes(self, node_map, current_node: int):
+        """
+        calculate all the angles at which nodes should be spread outwards from the node in focus,
+        while taking into account the node we came from, if there is need for that
+        """
+        # first, get count of how many other nodes spread even further out, to the nodes that we want to
+        # draw in this step apply a correction, if the nodes already selected in this very step are
+        # somewhat connected to each other
 
-        ax.set_aspect(1)
-        ax.set_ylim(0, self.graph_image_size[0])
-        ax.set_xlim(0, self.graph_image_size[1])
-        for chunk in content_map:
+        # the "adj_node" express exactly same members as the "surrounding_node", but we take them into account while
+        # counting from different perspectives, that's why we need 2 different methods of iterations and "2 scopes"
+        # one is for counting from the perspective of the center node that we try to spread from (adj_node), and the other
+        # is when we take account connectivity of the surrounding nodes between themselves (not accounting center then)
+
+        # so we kind of do double-duty check here
+        surrounding_elements_count = []
+        for adj_node in node_map[current_node]["connected_nodes"]:
+            count = node_map[adj_node]["conn_count"]
+            correction = sum([
+                1 if surrounding_node in node_map[adj_node]["connected_nodes"] else 0
+                for surrounding_node in node_map[current_node]["connected_nodes"]
+            ])
+            surrounding_elements_count.append(count - correction)
+
+        s = sum(surrounding_elements_count)
+
+        # spread out the unaccounted nodes - calc. angles of spread, and later obtain coordinates of the graph members
+        if s > 1:
+            # calculate allowed space size and start angle that will get passed to spread out nodes visually
+            if not node_map[current_node]["spreadout_origin_angle"] \
+                    and not node_map[current_node]["spreadout_origin_angle"]:
+                allowed_angle_span = 360
+                start_angle = 0
+            else:
+                allowed_angle_span = 360 - node_map[current_node]["spreadout_reserved_angle"]
+                start_angle = node_map[current_node]["spreadout_origin_angle"] + \
+                              node_map[current_node]["spreadout_reserved_angle"] / 2
+                if start_angle > 360:
+                    start_angle -= 360
+
+            partition = [round(allowed_angle_span * part / s) for part in surrounding_elements_count]
+            angle_origins = [start_angle + sum(partition[:index])
+                             for index, element in enumerate(partition)]
+            angles = [p / 2 + o for p, o in zip(partition, angle_origins)]
+        else:
+            partition = []
+            angles = [180]
+
+        # set other nodes in the map for future spreading
+        if len(partition) >= 2:
+            origin = node_map[current_node]["coordinates"]
+            for adj_node, angle, part in zip(node_map[current_node]["connected_nodes"], angles, partition):
+                node_map[adj_node]["coordinates"] = [
+                    origin[0] + round(self.edge_length * sin(pi * angle / 180)),
+                    origin[1] + round(self.edge_length * cos(pi * angle / 180))
+                ] if node_map[adj_node]["coordinates"] == [None, None] else node_map[adj_node]["coordinates"]
+                # node_map[adj_node]["spreadout_origin_angle"] = angle
+                if (origin_angle := 180 + angle) < 360:
+                    node_map[adj_node]["spreadout_origin_angle"] = origin_angle
+                else:
+                    node_map[adj_node]["spreadout_origin_angle"] = origin_angle - 360
+                if 180 - part < 0:
+                    node_map[adj_node]["spreadout_reserved_angle"] = 60
+                else:
+                    node_map[adj_node]["spreadout_reserved_angle"] = 180 - part
+
+        return node_map
+
+    def draw_lines_from_node(self, node_map: dict, current_node: int):
+        """
+        set the coordinates of the nodes with respect to the node in focus, and then, after the connected nodes
+        coordinate pairs are finally known, output a list of lines (point-point pairs) to be drawn in the graph image.
+
+        First node always starts in the center, and connected nodes spread out around the node in focus. Furthermore,
+        space that is left for other nodes (in terms of the "free area" that will be left, surrounding the nodes,
+         that spread out of the one in focus) is weighted, accounting for the adjacent nodes that also can have
+        connections themselves.
+
+        For example:
+            We start from the node 3, which has 5 nodes that are connected to it.
+            If the graph is a star, and nodes have no additional connection, other than this one (which is node nr.3),
+            each one of them will be treated with equal weight, and spread evenly around. The spread mechanism will use
+            the circle as the base, and each adjacent node "coordinate" will originate on the circle (more or less - keep
+            rounding error in mind)
+
+        Another example:
+            We start from node nr.3, have connections to 5 other nodes, but one of them (lets say, nr.6) has 3 other
+            connections. Nodes will be spread, taking into account the node 6 having 3x as high of a weight, and the angle
+            between nodes adjacent to node nr. 6 will be wider, and will become more narrow for other nodes.
+
+        In other words: Angle "X36" and "63Y" will be wider in latter case, while in first case all angles made from the
+        graph connections will have the same value.
+
+        If the node already has a coordinate, limit the angle of other nodes to be drawn and use allowed angle spread as the
+        permitted space to draw nodes that have not been accounted for yet.
+
+        :param node_map: keeps the track of coordinates of entire graph, and interconnectivity information
+        :param current_node: current node we focus on spreading outwards from
+        :return: updated node_map, list of lines to draw
+        """
+
+        def check_node_placement(node_map__: dict, current_node__: int,):  # angles: list
+            """
+            if node could hide a potential connection (by visually being placed in the middle of another
+            connection of 2 different nodes), move it slightly up
+            """
+            neighbour_count = node_map__[current_node__]["conn_count"]
+            if neighbour_count % 2 == 0 and neighbour_count:
+                print('node placement check confirmed')
+                node_map__[current_node__]["coordinates"] = [
+                    node_map__[current_node__]["coordinates"][0],
+                    node_map__[current_node__]["coordinates"][1] + self.node_radius
+                ]
+            return node_map__
+
+        lines = []
+
+        # set the graph origin if this is first node
+        if node_map[current_node]["coordinates"] == [None, None]:
+            node_map[current_node]["coordinates"] = [500, 500]
+
+        for k in node_map[current_node]["connected_nodes"]:
+            if node_map[current_node]["index"] in node_map[k]["connected_nodes"]:
+                node_map[k]["connected_nodes"].remove(node_map[current_node]["index"])
+
+        node_map = self.spread_surrounding_nodes(node_map, current_node)
+
+        # check if any connection will have a potential to get hidden when being drawn
+        node_map = check_node_placement(node_map, current_node) # angles
+
+        # add lines that spread from center node
+        lines.extend([
+            (node_map[current_node]["coordinates"], node_map[adj_node]["coordinates"])
+            for adj_node in node_map[current_node]["connected_nodes"]
+        ])
+
+        # add the lines that connect between surrounding nodes
+        pairs_to_add = []
+        for adj_node in node_map[current_node]["connected_nodes"]:
+            for surrounding_node in node_map[adj_node]["connected_nodes"]:
+                # if connection between surrounding nodes - add a connection to be drawn
+                if surrounding_node in node_map[current_node]["connected_nodes"]:
+                    # can't modify contents of arr while running loop so saving for later
+                    # prevent duplicate due to mirroring
+                    if (
+                            ((surrounding_node, adj_node) not in pairs_to_add) and
+                            ((adj_node, surrounding_node) not in pairs_to_add)
+                    ):
+                        pairs_to_add.append((surrounding_node, adj_node))
+
+        for surrounding_node, adj_node in pairs_to_add:
+            lines.append((node_map[surrounding_node]["coordinates"], node_map[adj_node]["coordinates"]))
+            node_map[adj_node]["connected_nodes"].remove(surrounding_node)
+            node_map[surrounding_node]["connected_nodes"].remove(adj_node)
+
+        if node_map[current_node]["connected_nodes"]:
+            # draw the one that has most connections first
+            connected_nodes = [(index, node_map[index]["conn_count"])
+                               for index in node_map[current_node]["connected_nodes"]]
+            s_connected_nodes = sorted(connected_nodes, key=lambda x: x[1], reverse=True)
+            for node_index, _ in s_connected_nodes:
+                node_map, lines__ = self.draw_lines_from_node(node_map, node_index)
+                lines.extend(lines__)
+
+        # next_nodes = node_map_[current_node["index"]]["connected_nodes"]
+        node_map[current_node]["connected_nodes"] = set()
+        return node_map, lines  # , next_nodes
+
+    def draw_generic_graph(self, ax: Axes, fig: Figure, node_map: dict):
+        fig.suptitle(f"Graph structure, n={len(node_map.keys())}")
+        for node in node_map:
+            if node_map[node]['coordinates'] != [None, None]:
+                ax.add_artist(Circle(
+                    xy=node_map[node]['coordinates'],
+                    radius=self.node_radius,  # * len(node_map[chunk]['contents'])
+                    color=rgb_to_matlab(0, 255, 255),
+                    zorder=5
+                ))
+                ax.add_artist(Text(
+                    x=node_map[node]['coordinates'][0],
+                    y=node_map[node]['coordinates'][1],
+                    text=f'{node_map[node]["index"]}',
+                    color=rgb_to_matlab(255, 0, 0),
+                    verticalalignment='center',
+                    horizontalalignment='center',
+                    zorder=10
+                ))
+        spines = ['bottom', 'top', 'left', 'right']
+        ax.spines: Dict[str, Spine]  # noqa
+        for spine in spines:
+            ax.spines[spine].set_visible(False)
+
+        return ax, fig
+
+    def draw_graph_solution(self, ax: Axes, fig: Figure, node_map: dict, solution_number: int = 0):
+        """it draws only one example solution. If you want to draw a particular one, pass a number os parameter"""
+        text_color = rgb_to_matlab(0, 0, 0)
+        yellow_partition_member = rgb_to_matlab(255, 255, 102)
+        green_partition_member = rgb_to_matlab(153, 255, 102)
+        fig.suptitle(f"Graph solution, Cut_count={self.cuts}")
+        solution = self.solutions[solution_number]
+        for node_index, c_bit_repr in enumerate(solution):
+            if c_bit_repr == "1":
+                c_color = yellow_partition_member
+            else:
+                c_color = green_partition_member
             ax.add_artist(Circle(
-                xy=content_map[chunk]['coordinates'],
-                radius=self.node_radius*len(content_map[chunk]['contents']),
-                color=rgb_to_matlab(0, 255, 255)
+                xy=node_map[node_index]['coordinates'],
+                radius=self.node_radius,  # * len(node_map[chunk]['contents'])
+                color=c_color,
+                zorder=5
             ))
             ax.add_artist(Text(
-                x=content_map[chunk]['coordinates'][0],
-                y=content_map[chunk]['coordinates'][1],
-                text=f'{len(content_map[chunk]["contents"])}',
-                color=rgb_to_matlab(255, 0, 0),
+                x=node_map[node_index]['coordinates'][0],
+                y=node_map[node_index]['coordinates'][1],
+                text=f'{node_map[node_index]["index"]}',
+                color=text_color,
                 verticalalignment='center',
-                horizontalalignment='center'
+                horizontalalignment='center',
+                zorder=10
             ))
+        spines = ['bottom', 'top', 'left', 'right']
+        ax.spines: Dict[str, Spine]  # noqa
+        for spine in spines:
+            ax.spines[spine].set_visible(False)
+        ax.tick_params(labelleft=False, left=False)
+        ax.tick_params(labelbottom=False, bottom=False)
 
-        # fig.show()
-        # plt.draw()
-        plt.show()
+        return ax, fig
 
-    def chunk_nodes(self, nodes_with_attributes: list):
-        """
-        Chunk nodes that connect together. Try to form a group of three nodes (i.e. find
-        instances of one node that has connection to 2 others) based on graph interconnectivity.
-        """
-        chunks = []
-        current_chunk = []
-        # sort by number of connections to deal with high-connectivity nodes first
-        sorted_node_tab = sorted(nodes_with_attributes, key=lambda element: -element[2])
-        j = 0
-        while sorted_node_tab:
-            # always chunk at least 2 connected nodes
-            print("new chunk now", current_chunk)
-            current_chunk.append(sorted_node_tab[0])
-            current_node = sorted_node_tab.pop(0)
-            current_node_connections = current_node[1]
-            if not sorted_node_tab:
-                # this was the last node in entire graph to take account for
-                chunks.append(current_chunk)
-                break
-            i = 0
-            # here we try to form a triple of nodes, we do not check for triangles however
-            while len(current_chunk) <= 2 and i < 2:
-                print(i)
-                to_pop = -1
-                for index, n in enumerate(sorted_node_tab):
-                    if n[0] in current_node_connections:
-                        print("pop found")
-                        to_pop = index
-                        break
-                if to_pop >= 0:
-                    print('poping thing:', to_pop)
-                    # popping elements found from sorted tab into chunk
-                    current_chunk.append(sorted_node_tab.pop(to_pop))
-                    print("chunk now", current_chunk)
-                # sanity value when we do not find anything useful in node tab, for example a node with
-                # single connection to somewhere else.
-                i += 1
-            j += 1
-            chunks.append(current_chunk)
-            current_chunk = []
-            if j > 10:
-                break
-
-        return chunks
-
-    def spread_inner_parts(self, inner_parts_count: int):
-        pass
-
-    def spread_outer_parts(self, outer_parts_count, full_space=False):
-        pass
-
-    def calculate_chunk_coordinates(self, node_chunks: list[list]):
-        """pre-plan initial chunk 'areas' that would occupy target image of a graph"""
-        # inner area of a graph should be taken by the triples, especially if those contain hubs, outside area should
-        # be either pairs or single edges (logically those can be thrown practically anywhere)
-        content_map = {}
-        inner_parts = []
-        all_checked = False
-        while not all_checked:
-            selected = -1
-            for index, chunk in enumerate(node_chunks):
-                if len(chunk) == 3:
-                    selected = index
-                    inner_parts.append(chunk)
-            if selected != -1:
-                node_chunks.pop(selected)
-                continue
-
-            all_checked = True
-        # either all that is left will get converted into outer_parts or only some chunks
-        outer_parts = node_chunks
-
-        # obtain decent coordinates that chunks could place themselves into
-        if inner_parts and outer_parts:
-            legal_inner_positions = self.spread_inner_parts(len(inner_parts))
-            legal_outer_positions = self.spread_outer_parts(len(outer_parts), full_space=False)
-        else:
-            legal_inner_positions = []
-            legal_outer_positions = self.spread_outer_parts(outer_parts, full_space=True)
-
-        print(legal_inner_positions)
-
-    def init_canvas(self):
-        """plan initial edges and nodes on the graph in the possibly nice and clear way"""
+    def draw_nodes(self, present_solution=False):
+        """draw edges and nodes on the graph in possibly the least offensive way..."""
         nodes_with_connections = [[node, set(self.flatten_once([edge for edge in self.edges if node in edge]))]
                                   for node in range(self.nodes)]
 
@@ -223,32 +345,91 @@ class Graph2CutVisualizer:
             n[1].remove(n[0])
             n.append(len(n[1]))
 
-        # decide what is a hub and what isn't a hub - hub could be inside a graph picture where it could be easier to
-        # avoid big line overlaps, when there is large number of nodes to connect between
-        # an 'average' of how many other nodes single node sees
-        hub_factor = sum([n[2] for n in nodes_with_connections])/self.nodes
-        print(hub_factor)
-        for n in nodes_with_connections:
-            if n[-1] >= ceil(hub_factor) + 1:
-                n.append(True)
-            else:
-                n.append(False)
+        sorted_node_tab = sorted(nodes_with_connections, key=lambda element: -element[2])
 
-        nodes_chunks = self.chunk_nodes(nodes_with_connections)
-        content_map = self.calculate_chunk_coordinates(nodes_chunks)
-        # self.show_chunk_placements(content_map)
+        node_map: dict[int, dict[str, Any]] = {
+            e[0]: {
+                "index": e[0],
+                "connected_nodes": e[1],
+                "conn_count": e[2],
+                "coordinates": [None, None],
+                # below a fragment that denotes banned space that needs to be left free for visual purposes
+                "spreadout_origin_angle": None,  # at what angle does the previous connection come from?
+                "spreadout_reserved_angle": None,  # how much of a angular space does the previous connection take?
+            } for e in sorted_node_tab
+        }
+        current_node_ = sorted_node_tab[0]
+
+        # this solves node positioning recursively
+        node_map, lines = self.draw_lines_from_node(node_map, current_node_[0])
+
+        fig, ax = plt.subplots(figsize=(7., 7.))
+        fig: Figure
+        ax: Axes
+        # for each part that would contain a piece of content, draw circle and text with number of nodes in it
+        # the smaller the circle the fewer nodes it represents
+        # keyword list: "contents" (list[list]), "coordinates" (x,y), "position": (inner, outer)
+        min_y, max_y = 250, 750
+        min_x, max_x = 250, 750
+
+        window_init = True
+        for node in node_map:
+            if node_map[node]['coordinates'] != [None, None]:
+                if window_init:
+                    min_x, max_x = [node_map[node]['coordinates'][0]] * 2
+                    min_y, max_y = [node_map[node]['coordinates'][1]] * 2
+                    window_init = False
+                    continue
+                if node_map[node]['coordinates'][0] > max_x:
+                    max_x = node_map[node]['coordinates'][0]
+                if node_map[node]['coordinates'][0] < min_x:
+                    min_x = node_map[node]['coordinates'][0]
+                if node_map[node]['coordinates'][1] > max_y:
+                    max_y = node_map[node]['coordinates'][1]
+                if node_map[node]['coordinates'][1] < min_y:
+                    min_y = node_map[node]['coordinates'][1]
+
+        min_y -= self.free_drawing_space
+        min_x -= self.free_drawing_space
+        max_y += self.free_drawing_space
+        max_x += self.free_drawing_space
+
+        ax.set_aspect(1)
+        ax.set_ylim(min_y, max_y)
+        ax.set_xlim(min_x, max_x)
+
+        # draw nodes
+        if present_solution and self.solutions:
+            ax, fig = self.draw_graph_solution(ax, fig, node_map)
+        else:
+            ax, fig = self.draw_generic_graph(ax, fig, node_map)
+
+        # draw lines
+        for line in lines:
+            ax.add_artist(Line2D(
+                xdata=[p[0] for p in line],
+                ydata=[p[1] for p in line],
+                linewidth=2,
+                color='black',
+                marker='None',
+                zorder=0
+            ))
+
+        fig.savefig(fname='sample_graph_image.png', dpi=200)
 
 
 if __name__ == '__main__':
     nodes_ = 10
     edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
              [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+    # nodes_ = 3
+    # edges = [[0, 1], [1, 2]]
 
-    solver = Graph2Cut(nodes_, edges, cuts_number=len(edges) - 3, optimization='qbits')
+    solver = Graph2Cut(nodes_, edges, cuts_number=len(edges)-5, optimization='qbits')
     solver.solve()
     solver.solution_analysis()
 
     visualiser = Graph2CutVisualizer(graph_solver=solver)
     # print(visualiser.graph_image_size_inches)
-    visualiser.init_canvas()
+    visualiser.draw_nodes(present_solution=True)
 
