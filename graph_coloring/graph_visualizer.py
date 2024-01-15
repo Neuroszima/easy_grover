@@ -1,8 +1,7 @@
 from math import ceil, sqrt, sin, cos, pi
-# from random import random
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Literal
+from warnings import warn
 
-import tkinter
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes._axes import Axes
@@ -15,19 +14,6 @@ from circuit_constructor import Graph2Cut
 DIM_TYPE = list[int, int] | tuple[int, int]
 SCALE_TYPE = list[float, float] | tuple[float, float]
 plt.rcParams['font.family'] = 'monospace'
-
-# root = Tk()
-# MM_TO_INCH = 10/25.4
-# SCREEN_WIDTH = root.winfo_screenwidth()
-# SCREEN_WIDTH_MM = root.winfo_screenmmwidth()
-# SCREEN_WIDTH_INCH = SCREEN_WIDTH_MM * MM_TO_INCH
-# SCREEN_HEIGHT = root.winfo_screenheight()
-# SCREEN_HEIGHT_MM = root.winfo_screenmmheight()
-# SCREEN_HEIGHT_INCH = SCREEN_HEIGHT_MM * MM_TO_INCH
-# Tk().quit()
-# root.quit()
-# del root
-# print(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_HEIGHT_MM, SCREEN_WIDTH_MM)
 
 
 def rgb_to_matlab(r, g, b) -> tuple:
@@ -47,16 +33,21 @@ class Graph2CutVisualizer:
     """
 
     def __init__(self, nodes: Optional[int] = 0, edge_list: list[tuple[int, ...] | list[int, ...]] = None,
-                 solutions: Optional[list] = None, graph_solver: Optional[Graph2Cut] = None):
+                 solutions: Optional[list] = None, graph_solver: Optional[Graph2Cut] = None,
+                 base_graph_size: Optional[float] = 5.):
         self.solutions = solutions if solutions else None
         if nodes and edge_list:
             self.nodes = nodes
             self.edges = edge_list
+            self.results = None
+            self.shots = None
         elif graph_solver:
             self.nodes = graph_solver.graph_nodes
             self.edges = graph_solver.edge_list
-            self.solutions = [s for s in graph_solver.counts]
+            self.results = graph_solver.counts
+            self.solutions = graph_solver.possible_answers
             self.cuts = graph_solver.cuts_number
+            self.shots = graph_solver.current_job_shots
         else:
             raise ValueError("Neither nodes accompanying list of edges, nor a graph solver instance has been "
                              "passed. Cannot initialize visualizer.")
@@ -66,6 +57,7 @@ class Graph2CutVisualizer:
         self.node_radius = 10
         self.edge_length = 75
         self.free_drawing_space = 50
+        self.base_graph_size = base_graph_size
 
     @property
     def inner_graph_area(self):
@@ -81,17 +73,6 @@ class Graph2CutVisualizer:
     def right_outer_graph_area(self):
         """same as left outer area, sets"""
         return [1-self.inner_outer_scale_edge, 1]
-
-    # @property
-    # def graph_image_size_inches(self):
-    #     """
-    #     gets inch representation of an image size when, originally, one chose width/height in pixels
-    #     helper property to convert into matplotlib-friendly figure values.
-    #     """
-    #     return (
-    #         self.graph_image_size[0] / SCREEN_WIDTH * SCREEN_WIDTH_INCH,
-    #         self.graph_image_size[1] / SCREEN_HEIGHT * SCREEN_HEIGHT_INCH
-    #     )
 
     @staticmethod
     def flatten_once(arr: list):
@@ -206,6 +187,7 @@ class Graph2CutVisualizer:
         :param current_node: current node we focus on spreading outwards from
         :return: updated node_map, list of lines to draw
         """
+        warn("this method is experimental")
 
         def check_node_placement(node_map__: dict, current_node__: int,):  # angles: list
             """
@@ -236,10 +218,11 @@ class Graph2CutVisualizer:
         # check if any connection will have a potential to get hidden when being drawn
         node_map = check_node_placement(node_map, current_node) # angles
 
-        # add lines that spread from center node
+        # keep the track of lines that spread from center node
         lines.extend([
-            (node_map[current_node]["coordinates"], node_map[adj_node]["coordinates"])
-            for adj_node in node_map[current_node]["connected_nodes"]
+            # (node_map[current_node]["coordinates"], node_map[adj_node]["coordinates"])
+            # for adj_node in node_map[current_node]["connected_nodes"]
+            (current_node, adj_node) for adj_node in node_map[current_node]["connected_nodes"]
         ])
 
         # add the lines that connect between surrounding nodes
@@ -257,7 +240,8 @@ class Graph2CutVisualizer:
                         pairs_to_add.append((surrounding_node, adj_node))
 
         for surrounding_node, adj_node in pairs_to_add:
-            lines.append((node_map[surrounding_node]["coordinates"], node_map[adj_node]["coordinates"]))
+            # lines.append((node_map[surrounding_node]["coordinates"], node_map[adj_node]["coordinates"]))
+            lines.append((surrounding_node, adj_node))
             node_map[adj_node]["connected_nodes"].remove(surrounding_node)
             node_map[surrounding_node]["connected_nodes"].remove(adj_node)
 
@@ -300,14 +284,18 @@ class Graph2CutVisualizer:
 
         return ax, fig
 
-    def draw_graph_solution(self, ax: Axes, fig: Figure, node_map: dict, solution_number: int = 0):
+    def draw_graph_solution(
+            self, ax: Axes, fig: Figure, node_map: dict,
+            solution_number: int = 0, top: int = None, left: int = None):
         """it draws only one example solution. If you want to draw a particular one, pass a number os parameter"""
         text_color = rgb_to_matlab(0, 0, 0)
         yellow_partition_member = rgb_to_matlab(255, 255, 102)
         green_partition_member = rgb_to_matlab(153, 255, 102)
         fig.suptitle(f"Graph solution, Cut_count={self.cuts}")
-        solution = self.solutions[solution_number]
-        for node_index, c_bit_repr in enumerate(solution):
+        solution = [*self.results.keys()][solution_number]
+
+        # the "byte ordering" of the qiskit counts is reversed compared to how we need to start painting nodes
+        for node_index, c_bit_repr in enumerate(solution[::-1]):
             if c_bit_repr == "1":
                 c_color = yellow_partition_member
             else:
@@ -327,6 +315,39 @@ class Graph2CutVisualizer:
                 horizontalalignment='center',
                 zorder=10
             ))
+        if top and left:
+            counts = self.results[solution]
+            # p = "NaN" if not self.shots else counts/self.shots
+            ax.add_artist(Text(
+                x=left,
+                y=top-10,
+                text=f'counts for this solution: {counts}',  # , percentage: {round(p,3)}%
+                color=text_color,
+                verticalalignment='center',
+                horizontalalignment='left',
+                zorder=10
+            ))
+            if tuple([solution, counts]) in self.solutions:
+                ax.add_artist(Text(
+                    x=left,
+                    y=top-25,
+                    text=f'Good Solution',
+                    color=text_color,
+                    verticalalignment='center',
+                    horizontalalignment='left',
+                    zorder=10
+                ))
+            else:
+                ax.add_artist(Text(
+                    x=left,
+                    y=top-25,
+                    text=f'Bad Solution',
+                    color=text_color,
+                    verticalalignment='center',
+                    horizontalalignment='left',
+                    zorder=10
+                ))
+
         spines = ['bottom', 'top', 'left', 'right']
         ax.spines: Dict[str, Spine]  # noqa
         for spine in spines:
@@ -336,7 +357,9 @@ class Graph2CutVisualizer:
 
         return ax, fig
 
-    def draw_nodes(self, present_solution=False):
+    def draw_graph(self, present_solution=False, select_good=False,
+                   selected_answer: Optional[int] = None,
+                   draw_type: Optional[Literal["map", "circle"]] = None):
         """draw edges and nodes on the graph in possibly the least offensive way..."""
         nodes_with_connections = [[node, set(self.flatten_once([edge for edge in self.edges if node in edge]))]
                                   for node in range(self.nodes)]
@@ -360,12 +383,16 @@ class Graph2CutVisualizer:
         }
         current_node_ = sorted_node_tab[0]
 
-        # this solves node positioning recursively
-        node_map, lines = self.draw_lines_from_node(node_map, current_node_[0])
+        # below, "lines" is completely equivalent to edge list, when graph is drawn fully
+        # however we might wish to draw only a part of the graph, and then this will keep track of nodes drawn
+        if not draw_type:
+            draw_type = "circle"
+        if draw_type == "map":
+            # this solves node positioning recursively
+            node_map, lines = self.draw_lines_from_node(node_map, current_node_[0])
+        elif draw_type == "circle":
+            node_map, lines = self.draw_nodes_on_circle(node_map, nodes_count=len(nodes_with_connections))
 
-        fig, ax = plt.subplots(figsize=(7., 7.))
-        fig: Figure
-        ax: Axes
         # for each part that would contain a piece of content, draw circle and text with number of nodes in it
         # the smaller the circle the fewer nodes it represents
         # keyword list: "contents" (list[list]), "coordinates" (x,y), "position": (inner, outer)
@@ -394,42 +421,77 @@ class Graph2CutVisualizer:
         max_y += self.free_drawing_space
         max_x += self.free_drawing_space
 
+        x_span = max_x - min_x
+        y_span = max_y - min_y
+        ratio = x_span/y_span
+
+        if ratio > 1:
+            figsize = (ratio * self.base_graph_size, self.base_graph_size)
+        else:
+            ratio = 1/ratio
+            figsize = (self.base_graph_size, ratio * self.base_graph_size)
+
+        fig, ax = plt.subplots(figsize=figsize)
+        fig: Figure
+        ax: Axes
+        plt.subplots_adjust(**{
+            "left": 0.03, "right": 0.97,
+            "bottom": 0, "top": 0.92,
+        })
+
         ax.set_aspect(1)
         ax.set_ylim(min_y, max_y)
         ax.set_xlim(min_x, max_x)
 
         # draw nodes
         if present_solution and self.solutions:
-            ax, fig = self.draw_graph_solution(ax, fig, node_map)
+            if selected_answer:
+                ax, fig = self.draw_graph_solution(
+                    ax, fig, node_map, solution_number=selected_answer, top=max_y, left=min_x)
+            elif select_good:
+                sorted_answers = sorted([(ans, self.results[ans]) for ans in self.results], key=lambda x: x[1])[::-1]
+                print(sorted_answers)
+                print(self.solutions)
+                g_index = [*self.results.keys()].index(sorted_answers[0][0])
+                ax, fig = self.draw_graph_solution(
+                    ax, fig, node_map, solution_number=g_index, top=max_y, left=min_x)
+            else:
+                ax, fig = self.draw_graph_solution(ax, fig, node_map, top=max_y, left=min_x)
         else:
             ax, fig = self.draw_generic_graph(ax, fig, node_map)
 
         # draw lines
         for line in lines:
             ax.add_artist(Line2D(
-                xdata=[p[0] for p in line],
-                ydata=[p[1] for p in line],
+                xdata=[node_map[p]["coordinates"][0] for p in line],
+                ydata=[node_map[p]["coordinates"][1] for p in line],
                 linewidth=2,
                 color='black',
                 marker='None',
                 zorder=0
             ))
 
-        fig.savefig(fname='sample_graph_image.png', dpi=200)
+        # plt.show()
+        fig.savefig(fname='sample_graph_image_1.png', dpi=300)
+
+    def draw_nodes_on_circle(self, node_map: dict, nodes_count: int, middle_point: tuple | list | None = None):
+        """spread all the nodes in a circular fashion around, then keep track of which lines to draw"""
+        pass
 
 
 if __name__ == '__main__':
-    nodes_ = 10
-    edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
-             [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
-    # nodes_ = 3
-    # edges = [[0, 1], [1, 2]]
+    # nodes_ = 10
+    # edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+    #          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+    # print(len(edges))
+    nodes_ = 6
+    edges = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]  # [5, 0]
 
-    solver = Graph2Cut(nodes_, edges, cuts_number=len(edges)-5, optimization='qbits')
-    solver.solve()
+    solver = Graph2Cut(nodes_, edges, cuts_number=2, optimization='qbits')
+    solver.solve(shots=10000, diffusion_iterations=1)
     solver.solution_analysis()
 
     visualiser = Graph2CutVisualizer(graph_solver=solver)
     # print(visualiser.graph_image_size_inches)
-    visualiser.draw_nodes(present_solution=True)
+    visualiser.draw_graph(present_solution=True)
 

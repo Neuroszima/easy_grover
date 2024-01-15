@@ -19,7 +19,7 @@ class Graph2Cut:
     ALLOWED_OPTIMIZERS = ["gates", "qbits"]
     ALLOWED_CONDITIONS = ["="]
 
-    def __init__(self, nodes: int, edge_list: list[tuple[int, ...] | list[list[int, ...]]], cuts_number: int = None,
+    def __init__(self, nodes: int, edge_list: list[tuple[int] | list[int]], cuts_number: int = None,
                  condition: str = None, optimization: str = None):
         """
         Perform a graph splitting, based on the graph coloring problem. Only 2 colors are supported by this solver
@@ -132,7 +132,6 @@ class Graph2Cut:
 
         grover_diffusion_circuit = QuantumCircuit(self.node_qbit_register)
         x_gate_controlled = XGate().control(num_ctrl_qubits=len(self.node_qbit_register)-1)
-        # z_gate_controlled = qiskit.circuit.library.ZGate().control(num_ctrl_qubits=len(self.node_qbit_register)-1)
 
         grover_diffusion_circuit.h(self.node_qbit_register)
         grover_diffusion_circuit.x(self.node_qbit_register)
@@ -141,7 +140,6 @@ class Graph2Cut:
         grover_diffusion_circuit.h(self.node_qbit_register[-1])
         grover_diffusion_circuit.append(x_gate_controlled, [*self.node_qbit_register])
         grover_diffusion_circuit.h(self.node_qbit_register[-1])
-        # grover_diffusion_circuit.append(z_gate_controlled, self.node_qbit_register)
 
         grover_diffusion_circuit.x(self.node_qbit_register)
         grover_diffusion_circuit.h(self.node_qbit_register)
@@ -163,14 +161,11 @@ class Graph2Cut:
             # that match floor(log2) of exact qbit in a series to be added.
 
             temp = floor(int(log2(qbit_index+1))) + 1
-            # print(f"{temp=} now")
             gates_for_qbit = []
             while temp > 0:
                 gates_for_qbit.append([qbit, self.controlled_gate_dict[temp]])
                 temp -= 1
             all_gates.extend(gates_for_qbit)
-
-        # pprint(all_gates)
 
         for instruction_pack in all_gates:
             # here we add gates with control and make a part of the circuit
@@ -302,11 +297,6 @@ class Graph2Cut:
         self.circuit.h(self.node_qbit_register)
 
         edge_checker, adder, diffusion, condition_checker = self.assemble_subcircuits()
-        # print("in circuits check")
-        # print(f"edge_checker\n{edge_checker}")
-        # print(f"adder\n{adder}")
-        # print(f"diffusion\n{diffusion}")
-        # print(f"condition_checker\n{condition_checker}")
 
         for _ in range(diffusion_iterations):
             # oracle step
@@ -350,10 +340,6 @@ class Graph2Cut:
         self.circuit.h(self.node_qbit_register)
 
         adder_subcircuits_collection, diffusion_circuit, condition_check_circuit = self.assemble_subcircuits()
-        # print("in circuits check")
-        # print(f"adder\n{adder_subcircuits_collection}")
-        # print(f"diffusion\n{diffusion_circuit}")
-        # print(f"condition_checker\n{condition_check_circuit}")
 
         self.circuit.barrier()
         for _ in range(diffusion_iterations):
@@ -405,8 +391,6 @@ class Graph2Cut:
         default simulator to use is 'qasm' that provides only counts and measurements, but any can be used
         :returns: job results
         """
-        # figure = self.circuit.draw(output='mpl')
-        # plt.show()
         job = AerSimulator().run(self.circuit, shots=shots, seed_simulator=seed_simulator)
         self.current_job_shots = shots
         self.counts = job.result().get_counts(self.circuit)
@@ -429,12 +413,15 @@ class Graph2Cut:
         self.solution_analysis(verbose=verbose)
 
     def check_answers(self, sorted_answers: list):
+        """check if any of the answers obtained in "counts" is real solution to the problem posed"""
         self.possible_answers = []
         for proposal in sorted_answers:
+            # since the answers from qiskit are ordered in reverse to how we check, reverse sequence and then check
+            proposal_ = ("".join(reversed(proposal[0])), proposal[1])
             allowed_edges = len(self.edge_list) - self.cuts_number
             color_matches = 0
             for edge in self.edge_list:
-                if proposal[0][edge[0]] == proposal[0][edge[1]]:
+                if proposal_[0][edge[0]] == proposal_[0][edge[1]]:
                     color_matches += 1
 
             if color_matches ^ allowed_edges:
@@ -454,9 +441,8 @@ class Graph2Cut:
         """
         among given list of answers and counts related to them, search for possible answers of the given problem
 
-        here I solve this problem simply by recognizing the "step-up" in counts that possible answers receive after
-        diffusion step, by obtaining st_deviation of answer set counts and taking answers that are above 4sigma
-        distance away from the mean value
+        here I get this by checking if every possibility fits the cuts number posed in the problem by counting
+        them by hand, meanwhile gathering simple statistics (like "good answer count percentage" and such)
 
         this function is costly and naive, if you really want to gauge the performance of your solution,
         you might look at something called "quantum counting algorithm", or "quantum phase estimation algorithm"
@@ -501,65 +487,71 @@ class Graph2Cut:
 
 
 if __name__ == '__main__':
-    # nodes = 10
-    # edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
-    #          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+    nodes = 10
+    edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+             [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
-    solution_dictionairy = {}
-    max_iteration_attemps = 8
-    max_nodes = 10
-    solution_dictionairy['optimization'] = 'qbits'
-    solution_dictionairy['global_solver_seed'] = 10
-    print(f'global solver seed: {solution_dictionairy["global_solver_seed"]}')
+    cut = Graph2Cut(nodes, edges, cuts_number=len(edges)-5, optimization="qbits")
+    cut.solve(shots=10000, diffusion_iterations=1)
+    cut.solution_analysis(verbose=False)
+    print(cut.counts)
+    print("\nproposed answers:\n", cut.possible_answers)
 
-    for j in range(3, max_nodes+1):
-        # ring graph constructor
-        current_nodes = j
-        edges = [*pairwise([*range(current_nodes)])]
-        edges += [(edges[0][0], edges[-1][-1])]
-        print(f"\n\n\nring: {edges}")
-        max_allowed_uncut_edges = ceil(j/2)
-        solution_dictionairy[f"{current_nodes}_ring"] = dict()
-        for k in range(max_allowed_uncut_edges+1):
-            solution_dictionairy[f"{current_nodes}_ring"][f"{len(edges) - k}_cuts"] = dict()
-
-            for i in range(max_iteration_attemps):
-                start = perf_counter()
-                cut = Graph2Cut(current_nodes, edges, cuts_number=len(edges) - k, optimization="qbits")
-                cut.solve(shots=10000, diffusion_iterations=i+1,
-                          seed_simulator=solution_dictionairy['global_solver_seed'])
-                cut.solution_analysis(verbose=False)
-                end = perf_counter()
-                # print("shots", cut.current_job_shots)
-                # print("answers", cut.possible_answers)
-                # print("rejected", cut.best_rejected_answer)
-                # print("percentage", cut.answer_percentage)
-                result_dict = {
-                    'perf_counter_algo_time': end - start,
-                    'percentage': cut.answer_percentage,
-                }
-                if cut.possible_answers:
-                    result_dict['answer_count'] = len(cut.possible_answers)
-                    result_dict['example_answer'] = cut.possible_answers[0]
-                else:
-                    result_dict['answer_count'] = 0
-                    result_dict['example_answer'] = ("", 0)
-                solution_dictionairy[f"{current_nodes}_ring"][f"{len(edges)-k}_cuts"][f'{i+1}_diff_count'] = result_dict
-
-    pprint(solution_dictionairy)
-
-    # select decent answers to a problem
-    for ring in solution_dictionairy:
-        if ring in ['global_solver_seed', 'optimization']:
-            continue
-        for cuts in solution_dictionairy[ring]:
-            next_cuts = False
-            # print(cuts, ring)
-            for diffusion_count in solution_dictionairy[ring][cuts]:
-                case = solution_dictionairy[ring][cuts][diffusion_count]
-                if case['percentage'] > 0.1:
-                    print(ring, cuts, diffusion_count, case['answer_count'])
-                    next_cuts = True
-                    break
-            if next_cuts:
-                continue
+    # solution_dictionairy = {}
+    # max_iteration_attemps = 8
+    # max_nodes = 10
+    # solution_dictionairy['optimization'] = 'qbits'
+    # solution_dictionairy['global_solver_seed'] = 10
+    # print(f'global solver seed: {solution_dictionairy["global_solver_seed"]}')
+    #
+    # for j in range(3, max_nodes+1):
+    #     # ring graph constructor
+    #     current_nodes = j
+    #     edges = [*pairwise([*range(current_nodes)])]
+    #     edges += [(edges[0][0], edges[-1][-1])]
+    #     print(f"\n\n\nring: {edges}")
+    #     max_allowed_uncut_edges = ceil(j/2)
+    #     solution_dictionairy[f"{current_nodes}_ring"] = dict()
+    #     for k in range(max_allowed_uncut_edges+1):
+    #         solution_dictionairy[f"{current_nodes}_ring"][f"{len(edges) - k}_cuts"] = dict()
+    #
+    #         for i in range(max_iteration_attemps):
+    #             start = perf_counter()
+    #             cut = Graph2Cut(current_nodes, edges, cuts_number=len(edges) - k, optimization="qbits")
+    #             cut.solve(shots=10000, diffusion_iterations=i+1,
+    #                       seed_simulator=solution_dictionairy['global_solver_seed'])
+    #             cut.solution_analysis(verbose=False)
+    #             end = perf_counter()
+    #             # print("shots", cut.current_job_shots)
+    #             # print("answers", cut.possible_answers)
+    #             # print("rejected", cut.best_rejected_answer)
+    #             # print("percentage", cut.answer_percentage)
+    #             result_dict = {
+    #                 'perf_counter_algo_time': end - start,
+    #                 'percentage': cut.answer_percentage,
+    #             }
+    #             if cut.possible_answers:
+    #                 result_dict['answer_count'] = len(cut.possible_answers)
+    #                 result_dict['example_answer'] = cut.possible_answers[0]
+    #             else:
+    #                 result_dict['answer_count'] = 0
+    #                 result_dict['example_answer'] = ("", 0)
+    #             solution_dictionairy[f"{current_nodes}_ring"][f"{len(edges)-k}_cuts"][f'{i+1}_diff_count'] = result_dict
+    #
+    # pprint(solution_dictionairy)
+    #
+    # # select decent answers to a problem
+    # for ring in solution_dictionairy:
+    #     if ring in ['global_solver_seed', 'optimization']:
+    #         continue
+    #     for cuts in solution_dictionairy[ring]:
+    #         next_cuts = False
+    #         # print(cuts, ring)
+    #         for diffusion_count in solution_dictionairy[ring][cuts]:
+    #             case = solution_dictionairy[ring][cuts][diffusion_count]
+    #             if case['percentage'] > 0.1:
+    #                 print(ring, cuts, diffusion_count, case['answer_count'])
+    #                 next_cuts = True
+    #                 break
+    #         if next_cuts:
+    #             continue
