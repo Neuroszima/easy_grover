@@ -1,3 +1,4 @@
+from copy import deepcopy
 from math import ceil, sqrt, sin, cos, pi
 from typing import Optional, Any, Dict, Literal
 from warnings import warn
@@ -291,7 +292,7 @@ class Graph2CutVisualizer:
         text_color = rgb_to_matlab(0, 0, 0)
         yellow_partition_member = rgb_to_matlab(255, 255, 102)
         green_partition_member = rgb_to_matlab(153, 255, 102)
-        fig.suptitle(f"Graph solution, Cut_count={self.cuts}")
+        fig.suptitle(f"Graph solution, edges={len(self.edges)}, Cut_count={self.cuts}")
         solution = [*self.results.keys()][solution_number]
 
         # the "byte ordering" of the qiskit counts is reversed compared to how we need to start painting nodes
@@ -391,7 +392,9 @@ class Graph2CutVisualizer:
             # this solves node positioning recursively
             node_map, lines = self.draw_lines_from_node(node_map, current_node_[0])
         elif draw_type == "circle":
-            node_map, lines = self.draw_nodes_on_circle(node_map, nodes_count=len(nodes_with_connections))
+            node_map, lines = self.draw_nodes_on_circumference(node_map, nodes_count=len(nodes_with_connections))
+        else:
+            raise ValueError("Improperly selected draw_type")
 
         # for each part that would contain a piece of content, draw circle and text with number of nodes in it
         # the smaller the circle the fewer nodes it represents
@@ -443,13 +446,16 @@ class Graph2CutVisualizer:
         ax.set_ylim(min_y, max_y)
         ax.set_xlim(min_x, max_x)
 
+        sorted_answers = sorted([(ans, self.results[ans]) for ans in self.results], key=lambda x: x[1])[::-1]
+
+        print(sorted_answers)
+        print(self.solutions)
         # draw nodes
         if present_solution and self.solutions:
             if selected_answer:
                 ax, fig = self.draw_graph_solution(
                     ax, fig, node_map, solution_number=selected_answer, top=max_y, left=min_x)
             elif select_good:
-                sorted_answers = sorted([(ans, self.results[ans]) for ans in self.results], key=lambda x: x[1])[::-1]
                 print(sorted_answers)
                 print(self.solutions)
                 g_index = [*self.results.keys()].index(sorted_answers[0][0])
@@ -472,26 +478,60 @@ class Graph2CutVisualizer:
             ))
 
         # plt.show()
-        fig.savefig(fname='sample_graph_image_1.png', dpi=300)
+        fig.savefig(fname='sample_graph_image_GOOD.png', dpi=300)
 
-    def draw_nodes_on_circle(self, node_map: dict, nodes_count: int, middle_point: tuple | list | None = None):
+    def draw_nodes_on_circumference(self, node_map: dict, nodes_count: int, middle_point: tuple | list | None = None):
         """spread all the nodes in a circular fashion around, then keep track of which lines to draw"""
-        pass
+        middle_point_ = middle_point if middle_point else [500, 500]
+        angles = [i*360/nodes_count for i in range(nodes_count)]
+        if nodes_count == 4:
+            distance = self.edge_length/sqrt(2)
+        elif nodes_count == 3:
+            distance = self.edge_length * sqrt(3)/2
+        elif nodes_count == 2:
+            distance = self.edge_length/2
+        elif nodes_count > 4:
+            # to evenly spread out more nodes around we will use couple angles and minimal distance
+            gamma = (180 - (360/nodes_count))/2
+            gamma_p = 90 - gamma
+            distance = self.edge_length * cos(pi * gamma_p / 180) / cos(pi * (gamma - gamma_p) / 180)
+            print("in draw_circ.; values:")
+            print(gamma, gamma_p, distance)
+        else:
+            raise ValueError(f"improper number of nodes: {nodes_count}")
+
+        for node, angle in zip(range(nodes_count), angles):
+            node_map[node]["coordinates"] = (
+                middle_point_[0] + distance * cos(pi * angle / 180),
+                middle_point_[1] + distance * sin(pi * angle / 180)
+            )
+
+        # following keeps track of edges that have to be displayed on the graph image, due to nodes being shown
+        # otherwise, we could as well just copy edges as an output which would be useless
+        lines = []
+        d_edges = deepcopy(self.edges)
+        for node in range(nodes_count):
+            if node_map[node]["coordinates"] != [None, None]:
+                to_add = [e for e in d_edges if node in e]
+                for e in to_add:
+                    d_edges.remove(e)
+                lines.extend(to_add)
+
+        return node_map, lines
 
 
 if __name__ == '__main__':
-    # nodes_ = 10
-    # edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
-    #          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+    nodes_ = 10
+    edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+             [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
     # print(len(edges))
-    nodes_ = 6
-    edges = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]  # [5, 0]
+    # nodes_ = 6
+    # edges = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]  # [5, 0]
 
-    solver = Graph2Cut(nodes_, edges, cuts_number=2, optimization='qbits')
+    solver = Graph2Cut(nodes_, edges, cuts_number=len(edges)-6, optimization='qbits')
     solver.solve(shots=10000, diffusion_iterations=1)
     solver.solution_analysis()
 
     visualiser = Graph2CutVisualizer(graph_solver=solver)
-    # print(visualiser.graph_image_size_inches)
-    visualiser.draw_graph(present_solution=True)
+    visualiser.draw_graph(present_solution=True, select_good=True, draw_type="circle")
 
