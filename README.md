@@ -4,15 +4,18 @@ Everything related to grover search algorithm for quantum computations
 A collection of tools designed to automate quantum circuit creation for solving problems described below.
 Solutions are made in ``qiskit`` library.
 
-### graph coloring
+Recently I added another tool to the toolbox, which draws a graph structure with the use of ``matplotlib``.
+One can pass a solver instance directly for automatic solution selection and drawing!
+
+### some information about graph coloring problem
 
 a subset of problems concentrated around graph structure partitioning. 
 Can be useful in partitioning datasets, some problems related to looking at layout differences.
 This type of approach also has a connection to traveling salesman problem.
 
-For now automated graph coloring is realised in a fashion of 2-cut algorithm, with simple addition being 
-required to count edges connected by nodes with color mismatch. So far implementation only includes a stiff 
-edge counting that is compared with a single value. 
+For now, in this library, automated graph coloring is realised in a fashion of 2-cut algorithm, with simple 
+addition being required to count edges connected by nodes with color mismatch. So far implementation only 
+includes a stiff edge counting that is compared with a single value.
 
 ##### Possible TODO's
 
@@ -20,15 +23,15 @@ edge counting that is compared with a single value.
    to signify connections between nodes of the same color can be allowed. In that case, it might be useful to 
    check a couple different values. We might construct a problem that reflects an example of "allow more 
    than 25 cuts to be performed", lets say, on a graph with a total of 30 connections between nodes.
-2. Different types of initialization can be performed to lower potentialneed for additional q-bits or save on toffoli 
+2. Different types of initialization can be performed to lower potential need for additional q-bits or save on toffoli 
    complexity of the end circuit.
-3. Potential q-bit reuse and optimizations, like usage of different gate combinations to achieve lower running 
-   costs on actual quantum computers.
+3. (some things already implemented!) Potential q-bit reuse and optimizations, like usage of different 
+   gate combinations to achieve lower running costs on actual quantum computers.
 4. Forming a solution in a different library, like ```cirq``` to boost the effectiveness of the algorithm and ease
    compilation of the solution on different quantum computer brands (like Google, IBM, D-Wave and such...)
 5. Extending the automation tools for creating circuits to solve a k-cut problem - variable number of colors a 
    graph represents
-6. Functions that let one schedule jobs in actual IBM cloud.
+6. Functions that let one schedule jobs in actual IBM cloud on an actual quantum computer!
 
 ### Usage
 
@@ -68,4 +71,45 @@ print(results)
 
 Member of an object -> ``graph_cutter.circuit`` has all the gate operations needed for it to be run, so 
 one could run it using different simulator or send it to cloud. Alternatively one could also look at its graphical 
-representation, though some more complicated designs may not be visualized correctly.
+representation, though some more complicated designs may not be visualized correctly in mpl (or look absolutely 
+atrocious as text).
+
+### update
+
+Since it is now possible to visualize a graph itself, you could enhance the pipline by just
+extending it by appending 2 lines at the end of your script. You could do in a way similar to the one presented below:
+
+```python
+from graph_coloring import circuit_constructor, graph_visualizer
+
+nodes_ = 10
+edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+
+solver = circuit_constructor.Graph2Cut(
+   nodes_, edges, cuts_number=len(edges)-6, optimization='qbits')
+solver.solve(shots=10000, diffusion_iterations=1)
+solver.solution_analysis()
+
+visualiser = graph_visualizer.Graph2CutVisualizer(graph_solver=solver)
+visualiser.draw_graph(present_solution=True, select_good=True, draw_type="circle")
+```
+
+It is also possible to draw the graph itself, without the need to solve it. You could do something along the 
+lines of the code below:
+
+```python
+from graph_coloring import graph_visualizer
+
+nodes_ = 10
+edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+
+
+visualiser = graph_visualizer.Graph2CutVisualizer(nodes=nodes_, edge_list=edges)
+visualiser.draw_graph(draw_type="circle")
+```
+
+### Results
+
+to be prepared...
