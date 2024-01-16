@@ -114,11 +114,11 @@ visualiser.draw_graph(draw_type="circle")
 
 graph structure from above:
 
-[Graph Image](./image_examples/example_graph_image_STRUCTURE.png)
+![Graph Image](./image_examples/example_graph_image_STRUCTURE.png)
 
-graph solution for the rgaph above (n=10, cut=10)
+solution visualisation for the graph above (n=10, cut=10)
 
-[Graph image 2](./image_examples/example_graph_image_GOOD_SOLUTION.png)
+![Graph image 2](./image_examples/example_graph_image_GOOD_SOLUTION.png)
 
 couple other solutions:
 
@@ -131,7 +131,7 @@ edges = [
 cuts = 10
 ```
 
-[Graph solution example 1](./image_examples/example_solution_7_10.png)
+![Graph solution example 1](./image_examples/example_solution_7_10.png)
 
 ```python
 nodes_ = 9
@@ -145,4 +145,4 @@ edges = [
 cuts = len(edges)-9
 ```
 
-[Graph solution example 2](./image_examples/example_solution_9_24.png)
+![Graph solution example 2](./image_examples/example_solution_9_24.png)
