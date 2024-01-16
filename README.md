@@ -112,4 +112,37 @@ visualiser.draw_graph(draw_type="circle")
 
 ### Results
 
-to be prepared...
+graph structure from above:
+
+[Graph Image](./image_examples/example_graph_image_STRUCTURE.png)
+
+graph solution for the rgaph above (n=10, cut=10)
+
+[Graph image 2](./image_examples/example_graph_image_GOOD_SOLUTION.png)
+
+couple other solutions:
+
+```python
+nodes = 7 
+edges = [
+    (4, 2), (2, 6), (6, 3), (3, 0), (0, 5), 
+    (5, 1), (5, 4), (2, 1), (3, 4), (5, 6)
+]
+cuts = 10
+```
+
+[Graph solution example 1](./image_examples/example_solution_7_10.png)
+
+```python
+nodes_ = 9
+edges = [
+  (1, 5), (5, 4), (4, 6), (6, 3), (3, 8), 
+  (8, 0), (0, 7), (7, 2), (2, 4), (8, 2), 
+  (6, 1), (3, 2), (3, 0), (8, 6), (3, 5), 
+  (5, 0), (0, 2), (0, 1), (5, 2), (0, 4), 
+  (2, 6), (7, 6), (3, 4), (1, 3)
+]
+cuts = len(edges)-9
+```
+
+[Graph solution example 2](./image_examples/example_solution_9_24.png)

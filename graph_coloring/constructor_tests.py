@@ -591,17 +591,14 @@ class ConstructorTester(unittest.TestCase):
         exception_incorrect_num = f"incorrect number of possible solutions, "
         exception_not_in_solutions = "%s not in possible solutions: %s, "
 
-        # self.graph_seed = 1323411,
-        # self.seed_simulator = 637265
-
         for nodes, edge_list, solution in self.certain_solution_graphs:
             diffusions = floor(sqrt(2**nodes/2) * pi/4)
-            print(nodes, edge_list, solution, diffusions)
+            # print(nodes, edge_list, solution, diffusions)
             solver = Graph2Cut(nodes, edge_list=edge_list, optimization="qbits")
             solver.solve(shots=1000, seed_simulator=self.seed_simulator, diffusion_iterations=diffusions)
             solver.solution_analysis()
             solutions = [a[0] for a in solver.possible_answers]
-            print(solver.possible_answers)
+            # print(solver.possible_answers)
             self.assertIn(solution, solutions, msg=exception_not_in_solutions.format(solution, solutions) + self.seeds)
             self.assertEqual(len(solver.possible_answers), 2, msg=exception_incorrect_num + self.seeds)
 
@@ -616,7 +613,7 @@ class ConstructorTester(unittest.TestCase):
             solver.solution_analysis()
             if not answer:
                 print('solution not found')
-                self.assertIs(solver.possible_answers, None)
+                self.assertEqual(solver.possible_answers, [])
             else:
                 print(f'solution found: {solution} {solver.possible_answers}')
                 self.assertEqual(len(solver.possible_answers), 2)
@@ -669,7 +666,6 @@ class ConstructorTester(unittest.TestCase):
         unsupported_operands = ["<", ">", ">=", "<="]
         nodes = 3
         edges = [(0, 1), (1, 2)]
-        # (nodes, edges, )
         self.assertRaises(NotImplementedError, Graph2Cut, *[nodes, edges],
                           optimization=''.join([choice(rand_chars) for _ in range(11)]))
         for condition in unsupported_operands:

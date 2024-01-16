@@ -1,5 +1,5 @@
 from copy import deepcopy
-from math import ceil, sqrt, sin, cos, pi
+from math import sqrt, sin, cos, pi
 from typing import Optional, Any, Dict, Literal
 from warnings import warn
 
@@ -259,6 +259,45 @@ class Graph2CutVisualizer:
         node_map[current_node]["connected_nodes"] = set()
         return node_map, lines  # , next_nodes
 
+    def draw_nodes_on_circumference(self, node_map: dict, nodes_count: int, middle_point: tuple | list | None = None):
+        """spread all the nodes in a circular fashion around, then keep track of which lines to draw"""
+        middle_point_ = middle_point if middle_point else [500, 500]
+        angles = [i*360/nodes_count for i in range(nodes_count)]
+        if nodes_count == 4:
+            distance = self.edge_length/sqrt(2)
+        elif nodes_count == 3:
+            distance = self.edge_length * sqrt(3)/2
+        elif nodes_count == 2:
+            distance = self.edge_length/2
+        elif nodes_count > 4:
+            # to evenly spread out more nodes around we will use couple angles and minimal distance
+            gamma = (180 - (360/nodes_count))/2
+            gamma_p = 90 - gamma
+            distance = self.edge_length * cos(pi * gamma_p / 180) / cos(pi * (gamma - gamma_p) / 180)
+            print("in draw_circ.; values:")
+            print(gamma, gamma_p, distance)
+        else:
+            raise ValueError(f"improper number of nodes: {nodes_count}")
+
+        for node, angle in zip(range(nodes_count), angles):
+            node_map[node]["coordinates"] = (
+                middle_point_[0] + distance * cos(pi * angle / 180),
+                middle_point_[1] + distance * sin(pi * angle / 180)
+            )
+
+        # following keeps track of edges that have to be displayed on the graph image, due to nodes being shown
+        # otherwise, we could as well just copy edges as an output which would be useless
+        lines = []
+        d_edges = deepcopy(self.edges)
+        for node in range(nodes_count):
+            if node_map[node]["coordinates"] != [None, None]:
+                to_add = [e for e in d_edges if node in e]
+                for e in to_add:
+                    d_edges.remove(e)
+                lines.extend(to_add)
+
+        return node_map, lines
+
     def draw_generic_graph(self, ax: Axes, fig: Figure, node_map: dict):
         fig.suptitle(f"Graph structure, n={len(node_map.keys())}")
         for node in node_map:
@@ -266,14 +305,16 @@ class Graph2CutVisualizer:
                 ax.add_artist(Circle(
                     xy=node_map[node]['coordinates'],
                     radius=self.node_radius,  # * len(node_map[chunk]['contents'])
-                    color=rgb_to_matlab(0, 255, 255),
+                    # color=rgb_to_matlab(255, 255, 255),
+                    facecolor=rgb_to_matlab(255, 255, 255),
+                    edgecolor=rgb_to_matlab(0, 0, 0),
                     zorder=5
                 ))
                 ax.add_artist(Text(
                     x=node_map[node]['coordinates'][0],
                     y=node_map[node]['coordinates'][1],
                     text=f'{node_map[node]["index"]}',
-                    color=rgb_to_matlab(255, 0, 0),
+                    color=rgb_to_matlab(0, 0, 0),
                     verticalalignment='center',
                     horizontalalignment='center',
                     zorder=10
@@ -282,6 +323,8 @@ class Graph2CutVisualizer:
         ax.spines: Dict[str, Spine]  # noqa
         for spine in spines:
             ax.spines[spine].set_visible(False)
+        ax.tick_params(labelleft=False, left=False)
+        ax.tick_params(labelbottom=False, bottom=False)
 
         return ax, fig
 
@@ -446,16 +489,13 @@ class Graph2CutVisualizer:
         ax.set_ylim(min_y, max_y)
         ax.set_xlim(min_x, max_x)
 
-        sorted_answers = sorted([(ans, self.results[ans]) for ans in self.results], key=lambda x: x[1])[::-1]
-
-        print(sorted_answers)
-        print(self.solutions)
         # draw nodes
         if present_solution and self.solutions:
             if selected_answer:
                 ax, fig = self.draw_graph_solution(
                     ax, fig, node_map, solution_number=selected_answer, top=max_y, left=min_x)
             elif select_good:
+                sorted_answers = sorted([(ans, self.results[ans]) for ans in self.results], key=lambda x: x[1])[::-1]
                 print(sorted_answers)
                 print(self.solutions)
                 g_index = [*self.results.keys()].index(sorted_answers[0][0])
@@ -477,56 +517,14 @@ class Graph2CutVisualizer:
                 zorder=0
             ))
 
-        # plt.show()
-        fig.savefig(fname='sample_graph_image_GOOD.png', dpi=300)
-
-    def draw_nodes_on_circumference(self, node_map: dict, nodes_count: int, middle_point: tuple | list | None = None):
-        """spread all the nodes in a circular fashion around, then keep track of which lines to draw"""
-        middle_point_ = middle_point if middle_point else [500, 500]
-        angles = [i*360/nodes_count for i in range(nodes_count)]
-        if nodes_count == 4:
-            distance = self.edge_length/sqrt(2)
-        elif nodes_count == 3:
-            distance = self.edge_length * sqrt(3)/2
-        elif nodes_count == 2:
-            distance = self.edge_length/2
-        elif nodes_count > 4:
-            # to evenly spread out more nodes around we will use couple angles and minimal distance
-            gamma = (180 - (360/nodes_count))/2
-            gamma_p = 90 - gamma
-            distance = self.edge_length * cos(pi * gamma_p / 180) / cos(pi * (gamma - gamma_p) / 180)
-            print("in draw_circ.; values:")
-            print(gamma, gamma_p, distance)
-        else:
-            raise ValueError(f"improper number of nodes: {nodes_count}")
-
-        for node, angle in zip(range(nodes_count), angles):
-            node_map[node]["coordinates"] = (
-                middle_point_[0] + distance * cos(pi * angle / 180),
-                middle_point_[1] + distance * sin(pi * angle / 180)
-            )
-
-        # following keeps track of edges that have to be displayed on the graph image, due to nodes being shown
-        # otherwise, we could as well just copy edges as an output which would be useless
-        lines = []
-        d_edges = deepcopy(self.edges)
-        for node in range(nodes_count):
-            if node_map[node]["coordinates"] != [None, None]:
-                to_add = [e for e in d_edges if node in e]
-                for e in to_add:
-                    d_edges.remove(e)
-                lines.extend(to_add)
-
-        return node_map, lines
+        plt.show()
+        # fig.savefig(fname='example_graph_image.png', dpi=300)
 
 
 if __name__ == '__main__':
     nodes_ = 10
     edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
              [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
-    # print(len(edges))
-    # nodes_ = 6
-    # edges = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]  # [5, 0]
 
     solver = Graph2Cut(nodes_, edges, cuts_number=len(edges)-6, optimization='qbits')
     solver.solve(shots=10000, diffusion_iterations=1)
@@ -534,4 +532,6 @@ if __name__ == '__main__':
 
     visualiser = Graph2CutVisualizer(graph_solver=solver)
     visualiser.draw_graph(present_solution=True, select_good=True, draw_type="circle")
+    # visualiser = Graph2CutVisualizer(nodes=nodes_, edge_list=edges)
+    # visualiser.draw_graph(draw_type="circle")
 
