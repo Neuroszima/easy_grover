@@ -161,5 +161,4 @@ cython_debug/
 .idea/
 
 # miscellaneous
-*.txt
 settings.py

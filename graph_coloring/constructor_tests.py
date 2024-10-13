@@ -355,9 +355,6 @@ class ConstructorTester(unittest.TestCase):
         # initialized state -> "01011001"
         # simulation result -> {"1111111": 10}
 
-        seed_ = time()
-        seed(seed_)
-        # print(f"time seed for edge_detector test for chain graph: {seed_}")
         nodes = 8
         chain_graph, __ = self.graph_constructor(nodes, chain_only=True)
         graph_cutter = Graph2Cut(nodes=nodes, edge_list=chain_graph, cuts_number=len(chain_graph))
@@ -396,8 +393,6 @@ class ConstructorTester(unittest.TestCase):
         """
         # here we just use
         # 1 - node color mismatch -> a cut; 0 - node color matching -> no cut
-        seed_ = time()
-        seed(seed_)
         random_graph = self.random_graphs_[4]
         nodes, edges, _ = random_graph
         graph_cutter = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges))
@@ -441,10 +436,6 @@ class ConstructorTester(unittest.TestCase):
         first a subtest is prepared to check if Qubit ordering works properly and proper Qubits are used to make
         certain sub-circuits, then the real addition is checked (for each sub-circuit created)
         """
-        seed_ = time()
-        # seed_ = 1700216428.893547
-        seed(seed_)
-        # print(f"time seed for test_qbit_reuse_adder: {seed_}")
         graph = self.random_chain_graphs[4]
 
         graph_cutter = Graph2Cut(nodes=graph[0], edge_list=graph[1], cuts_number=len(graph[1]), optimization='qbits')
@@ -463,15 +454,12 @@ class ConstructorTester(unittest.TestCase):
         for edge_index, edge, subcircuit in edge_counting_subcircuits:
             subcircuit: QuantumCircuit
             all_ops: OrderedDict = subcircuit.count_ops()
-            # print(f'\nnext sub-circuit: {edge}, {edge_index}')
             predicted_instruction_subregisters = self.instruction_usage_qbits(graph_cutter, edge, edge_index)
             actual_subregisters = []
             for op in all_ops:
                 actual_subregisters.extend([instruction.qubits for instruction in subcircuit.get_instructions(op)])
 
             for qubits_tuple in deepcopy(predicted_instruction_subregisters):
-                # print(f"currently checked tup: {qubits_tuple}")
-                # print(qubits_tuple in actual_subregisters)
                 if qubits_tuple in actual_subregisters:
                     predicted_instruction_subregisters.pop(
                         predicted_instruction_subregisters.index(qubits_tuple)

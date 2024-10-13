@@ -19,6 +19,8 @@ includes a stiff edge counting that is compared with a single value.
 
 ##### Possible TODO's
 
+0. <b>important - fix "PendingDeprecationWarning" for ".get_num_ancilla_qubits()" used in tests</b>
+
 1. Restriction to check against single edge sum can be extended to any bracket. For example solutions that allow edges 
    to signify connections between nodes of the same color can be allowed. In that case, it might be useful to 
    check a couple different values. We might construct a problem that reflects an example of "allow more 
@@ -32,6 +34,11 @@ includes a stiff edge counting that is compared with a single value.
 5. Extending the automation tools for creating circuits to solve a k-cut problem - variable number of colors a 
    graph represents
 6. Functions that let one schedule jobs in actual IBM cloud on an actual quantum computer!
+7. Let program recognize and derive graph structure from numpy matrix notation. (not really directional graphs, 
+   rather just support notation).
+
+Note: for 7 - assume symmetric square array as an input to the solver. If not symmetric - either raise error,
+or ignore and read certain part of array to assume other is symmetric half.
 
 ### Usage
 
