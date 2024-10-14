@@ -17,7 +17,7 @@ SCALE_TYPE = list[float, float] | tuple[float, float]
 plt.rcParams['font.family'] = 'monospace'
 
 
-def rgb_to_matlab(r, g, b) -> tuple:
+def rgb_to_matlab(r, g, b) -> tuple[float, float, float]:
     """
     converts regular intensity representation to MATLAB-like format, handled by matplotlib
     """
@@ -156,108 +156,6 @@ class Graph2CutVisualizer:
 
         return node_map
 
-    def draw_lines_from_node(self, node_map: dict, current_node: int):
-        """
-        set the coordinates of the nodes with respect to the node in focus, and then, after the connected nodes
-        coordinate pairs are finally known, output a list of lines (point-point pairs) to be drawn in the graph image.
-
-        First node always starts in the center, and connected nodes spread out around the node in focus. Furthermore,
-        space that is left for other nodes (in terms of the "free area" that will be left, surrounding the nodes,
-         that spread out of the one in focus) is weighted, accounting for the adjacent nodes that also can have
-        connections themselves.
-
-        For example:
-            We start from the node 3, which has 5 nodes that are connected to it.
-            If the graph is a star, and nodes have no additional connection, other than this one (which is node nr.3),
-            each one of them will be treated with equal weight, and spread evenly around. The spread mechanism will use
-            the circle as the base, and each adjacent node "coordinate" will originate on the circle (more or less - keep
-            rounding error in mind)
-
-        Another example:
-            We start from node nr.3, have connections to 5 other nodes, but one of them (lets say, nr.6) has 3 other
-            connections. Nodes will be spread, taking into account the node 6 having 3x as high of a weight, and the angle
-            between nodes adjacent to node nr. 6 will be wider, and will become more narrow for other nodes.
-
-        In other words: Angle "X36" and "63Y" will be wider in latter case, while in first case all angles made from the
-        graph connections will have the same value.
-
-        If the node already has a coordinate, limit the angle of other nodes to be drawn and use allowed angle spread as the
-        permitted space to draw nodes that have not been accounted for yet.
-
-        :param node_map: keeps the track of coordinates of entire graph, and interconnectivity information
-        :param current_node: current node we focus on spreading outwards from
-        :return: updated node_map, list of lines to draw
-        """
-        warn("this method is experimental")
-
-        def check_node_placement(node_map__: dict, current_node__: int,):  # angles: list
-            """
-            if node could hide a potential connection (by visually being placed in the middle of another
-            connection of 2 different nodes), move it slightly up
-            """
-            neighbour_count = node_map__[current_node__]["conn_count"]
-            if neighbour_count % 2 == 0 and neighbour_count:
-                print('node placement check confirmed')
-                node_map__[current_node__]["coordinates"] = [
-                    node_map__[current_node__]["coordinates"][0],
-                    node_map__[current_node__]["coordinates"][1] + self.node_radius
-                ]
-            return node_map__
-
-        lines = []
-
-        # set the graph origin if this is first node
-        if node_map[current_node]["coordinates"] == [None, None]:
-            node_map[current_node]["coordinates"] = [500, 500]
-
-        for k in node_map[current_node]["connected_nodes"]:
-            if node_map[current_node]["index"] in node_map[k]["connected_nodes"]:
-                node_map[k]["connected_nodes"].remove(node_map[current_node]["index"])
-
-        node_map = self.spread_surrounding_nodes(node_map, current_node)
-
-        # check if any connection will have a potential to get hidden when being drawn
-        node_map = check_node_placement(node_map, current_node) # angles
-
-        # keep the track of lines that spread from center node
-        lines.extend([
-            # (node_map[current_node]["coordinates"], node_map[adj_node]["coordinates"])
-            # for adj_node in node_map[current_node]["connected_nodes"]
-            (current_node, adj_node) for adj_node in node_map[current_node]["connected_nodes"]
-        ])
-
-        # add the lines that connect between surrounding nodes
-        pairs_to_add = []
-        for adj_node in node_map[current_node]["connected_nodes"]:
-            for surrounding_node in node_map[adj_node]["connected_nodes"]:
-                # if connection between surrounding nodes - add a connection to be drawn
-                if surrounding_node in node_map[current_node]["connected_nodes"]:
-                    # can't modify contents of arr while running loop so saving for later
-                    # prevent duplicate due to mirroring
-                    if (
-                            ((surrounding_node, adj_node) not in pairs_to_add) and
-                            ((adj_node, surrounding_node) not in pairs_to_add)
-                    ):
-                        pairs_to_add.append((surrounding_node, adj_node))
-
-        for surrounding_node, adj_node in pairs_to_add:
-            # lines.append((node_map[surrounding_node]["coordinates"], node_map[adj_node]["coordinates"]))
-            lines.append((surrounding_node, adj_node))
-            node_map[adj_node]["connected_nodes"].remove(surrounding_node)
-            node_map[surrounding_node]["connected_nodes"].remove(adj_node)
-
-        if node_map[current_node]["connected_nodes"]:
-            # draw the one that has most connections first
-            connected_nodes = [(index, node_map[index]["conn_count"])
-                               for index in node_map[current_node]["connected_nodes"]]
-            s_connected_nodes = sorted(connected_nodes, key=lambda x: x[1], reverse=True)
-            for node_index, _ in s_connected_nodes:
-                node_map, lines__ = self.draw_lines_from_node(node_map, node_index)
-                lines.extend(lines__)
-
-        # next_nodes = node_map_[current_node["index"]]["connected_nodes"]
-        node_map[current_node]["connected_nodes"] = set()
-        return node_map, lines  # , next_nodes
 
     def draw_nodes_on_circumference(self, node_map: dict, nodes_count: int, middle_point: tuple | list | None = None):
         """spread all the nodes in a circular fashion around, then keep track of which lines to draw"""
@@ -402,8 +300,7 @@ class Graph2CutVisualizer:
         return ax, fig
 
     def draw_graph(self, present_solution=False, select_good=False,
-                   selected_answer: Optional[int] = None,
-                   draw_type: Optional[Literal["map", "circle"]] = None):
+                   selected_answer: Optional[int] = None):
         """draw edges and nodes on the graph in possibly the least offensive way..."""
         nodes_with_connections = [[node, set(self.flatten_once([edge for edge in self.edges if node in edge]))]
                                   for node in range(self.nodes)]
@@ -427,17 +324,7 @@ class Graph2CutVisualizer:
         }
         current_node_ = sorted_node_tab[0]
 
-        # below, "lines" is completely equivalent to edge list, when graph is drawn fully
-        # however we might wish to draw only a part of the graph, and then this will keep track of nodes drawn
-        if not draw_type:
-            draw_type = "circle"
-        if draw_type == "map":
-            # this solves node positioning recursively
-            node_map, lines = self.draw_lines_from_node(node_map, current_node_[0])
-        elif draw_type == "circle":
-            node_map, lines = self.draw_nodes_on_circumference(node_map, nodes_count=len(nodes_with_connections))
-        else:
-            raise ValueError("Improperly selected draw_type")
+        node_map, lines = self.draw_nodes_on_circumference(node_map, nodes_count=len(nodes_with_connections))
 
         # for each part that would contain a piece of content, draw circle and text with number of nodes in it
         # the smaller the circle the fewer nodes it represents
@@ -531,7 +418,7 @@ if __name__ == '__main__':
     solver.solution_analysis()
 
     visualiser = Graph2CutVisualizer(graph_solver=solver)
-    visualiser.draw_graph(present_solution=True, select_good=True, draw_type="circle")
+    visualiser.draw_graph(present_solution=True, select_good=True)
     # visualiser = Graph2CutVisualizer(nodes=nodes_, edge_list=edges)
     # visualiser.draw_graph(draw_type="circle")
 
