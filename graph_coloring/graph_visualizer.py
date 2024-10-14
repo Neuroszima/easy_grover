@@ -1,7 +1,6 @@
 from copy import deepcopy
 from math import sqrt, sin, cos, pi
-from typing import Optional, Any, Dict, Literal
-from warnings import warn
+from typing import Optional, Any, Dict
 
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -25,7 +24,6 @@ def rgb_to_matlab(r, g, b) -> tuple[float, float, float]:
 
 
 class Graph2CutVisualizer:
-
     """
     graph solution visualization tool for graph solver
 
@@ -52,7 +50,7 @@ class Graph2CutVisualizer:
         else:
             raise ValueError("Neither nodes accompanying list of edges, nor a graph solver instance has been "
                              "passed. Cannot initialize visualizer.")
-        self.graph_image_size: DIM_TYPE = [1000, 1000]
+        # self.graph_image_size: DIM_TYPE = (1000, 1000)
         self.screen_diagonal = 23
         self.inner_outer_scale_edge = 0.25
         self.node_radius = 10
@@ -87,75 +85,6 @@ class Graph2CutVisualizer:
     def euclidean_distance(point1, point2):
         """calculate distance between the points"""
         return sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
-
-    def spread_surrounding_nodes(self, node_map, current_node: int):
-        """
-        calculate all the angles at which nodes should be spread outwards from the node in focus,
-        while taking into account the node we came from, if there is need for that
-        """
-        # first, get count of how many other nodes spread even further out, to the nodes that we want to
-        # draw in this step apply a correction, if the nodes already selected in this very step are
-        # somewhat connected to each other
-
-        # the "adj_node" express exactly same members as the "surrounding_node", but we take them into account while
-        # counting from different perspectives, that's why we need 2 different methods of iterations and "2 scopes"
-        # one is for counting from the perspective of the center node that we try to spread from (adj_node), and the other
-        # is when we take account connectivity of the surrounding nodes between themselves (not accounting center then)
-
-        # so we kind of do double-duty check here
-        surrounding_elements_count = []
-        for adj_node in node_map[current_node]["connected_nodes"]:
-            count = node_map[adj_node]["conn_count"]
-            correction = sum([
-                1 if surrounding_node in node_map[adj_node]["connected_nodes"] else 0
-                for surrounding_node in node_map[current_node]["connected_nodes"]
-            ])
-            surrounding_elements_count.append(count - correction)
-
-        s = sum(surrounding_elements_count)
-
-        # spread out the unaccounted nodes - calc. angles of spread, and later obtain coordinates of the graph members
-        if s > 1:
-            # calculate allowed space size and start angle that will get passed to spread out nodes visually
-            if not node_map[current_node]["spreadout_origin_angle"] \
-                    and not node_map[current_node]["spreadout_origin_angle"]:
-                allowed_angle_span = 360
-                start_angle = 0
-            else:
-                allowed_angle_span = 360 - node_map[current_node]["spreadout_reserved_angle"]
-                start_angle = node_map[current_node]["spreadout_origin_angle"] + \
-                              node_map[current_node]["spreadout_reserved_angle"] / 2
-                if start_angle > 360:
-                    start_angle -= 360
-
-            partition = [round(allowed_angle_span * part / s) for part in surrounding_elements_count]
-            angle_origins = [start_angle + sum(partition[:index])
-                             for index, element in enumerate(partition)]
-            angles = [p / 2 + o for p, o in zip(partition, angle_origins)]
-        else:
-            partition = []
-            angles = [180]
-
-        # set other nodes in the map for future spreading
-        if len(partition) >= 2:
-            origin = node_map[current_node]["coordinates"]
-            for adj_node, angle, part in zip(node_map[current_node]["connected_nodes"], angles, partition):
-                node_map[adj_node]["coordinates"] = [
-                    origin[0] + round(self.edge_length * sin(pi * angle / 180)),
-                    origin[1] + round(self.edge_length * cos(pi * angle / 180))
-                ] if node_map[adj_node]["coordinates"] == [None, None] else node_map[adj_node]["coordinates"]
-                # node_map[adj_node]["spreadout_origin_angle"] = angle
-                if (origin_angle := 180 + angle) < 360:
-                    node_map[adj_node]["spreadout_origin_angle"] = origin_angle
-                else:
-                    node_map[adj_node]["spreadout_origin_angle"] = origin_angle - 360
-                if 180 - part < 0:
-                    node_map[adj_node]["spreadout_reserved_angle"] = 60
-                else:
-                    node_map[adj_node]["spreadout_reserved_angle"] = 180 - part
-
-        return node_map
-
 
     def draw_nodes_on_circumference(self, node_map: dict, nodes_count: int, middle_point: tuple | list | None = None):
         """spread all the nodes in a circular fashion around, then keep track of which lines to draw"""
@@ -202,8 +131,7 @@ class Graph2CutVisualizer:
             if node_map[node]['coordinates'] != [None, None]:
                 ax.add_artist(Circle(
                     xy=node_map[node]['coordinates'],
-                    radius=self.node_radius,  # * len(node_map[chunk]['contents'])
-                    # color=rgb_to_matlab(255, 255, 255),
+                    radius=self.node_radius,
                     facecolor=rgb_to_matlab(255, 255, 255),
                     edgecolor=rgb_to_matlab(0, 0, 0),
                     zorder=5
@@ -221,15 +149,17 @@ class Graph2CutVisualizer:
         ax.spines: Dict[str, Spine]  # noqa
         for spine in spines:
             ax.spines[spine].set_visible(False)
-        ax.tick_params(labelleft=False, left=False)
-        ax.tick_params(labelbottom=False, bottom=False)
+        ax.tick_params(labelleft=False, left=False, labelbottom=False, bottom=False)
 
         return ax, fig
 
     def draw_graph_solution(
             self, ax: Axes, fig: Figure, node_map: dict,
             solution_number: int = 0, top: int = None, left: int = None):
-        """it draws only one example solution. If you want to draw a particular one, pass a number os parameter"""
+        """
+        it draws only one example solution. If you want to draw a particular one, pass a number os parameter
+        additionally, this method draws only solution of 2 color case
+        """
         text_color = rgb_to_matlab(0, 0, 0)
         yellow_partition_member = rgb_to_matlab(255, 255, 102)
         green_partition_member = rgb_to_matlab(153, 255, 102)
@@ -269,26 +199,21 @@ class Graph2CutVisualizer:
                 horizontalalignment='left',
                 zorder=10
             ))
+
             if tuple([solution, counts]) in self.solutions:
-                ax.add_artist(Text(
-                    x=left,
-                    y=top-25,
-                    text=f'Good Solution',
-                    color=text_color,
-                    verticalalignment='center',
-                    horizontalalignment='left',
-                    zorder=10
-                ))
+                display_text = 'Good Solution'
             else:
-                ax.add_artist(Text(
-                    x=left,
-                    y=top-25,
-                    text=f'Bad Solution',
-                    color=text_color,
-                    verticalalignment='center',
-                    horizontalalignment='left',
-                    zorder=10
-                ))
+                display_text = 'Bad Solution'
+
+            ax.add_artist(Text(
+                x=left,
+                y=top-25,
+                text=display_text,
+                color=text_color,
+                verticalalignment='center',
+                horizontalalignment='left',
+                zorder=10
+            ))
 
         spines = ['bottom', 'top', 'left', 'right']
         ax.spines: Dict[str, Spine]  # noqa
@@ -299,9 +224,18 @@ class Graph2CutVisualizer:
 
         return ax, fig
 
-    def draw_graph(self, present_solution=False, select_good=False,
-                   selected_answer: Optional[int] = None):
-        """draw edges and nodes on the graph in possibly the least offensive way..."""
+    def draw_graph(
+            self, present_solution=False, select_good=False,
+            selected_answer: Optional[int] = None, save_params: dict | None = None):
+        """
+        Draw edges and nodes on the graph
+
+        Prior to this method rework, there was second drawing method available; the only one available now is on
+        circle circumference.
+
+        You can now however pass "save_params" as dict with "image_name" (str type) and "image_dpi" (int type)
+        to trigger saving the figure as PNG.
+        """
         nodes_with_connections = [[node, set(self.flatten_once([edge for edge in self.edges if node in edge]))]
                                   for node in range(self.nodes)]
 
@@ -317,12 +251,8 @@ class Graph2CutVisualizer:
                 "connected_nodes": e[1],
                 "conn_count": e[2],
                 "coordinates": [None, None],
-                # below a fragment that denotes banned space that needs to be left free for visual purposes
-                "spreadout_origin_angle": None,  # at what angle does the previous connection come from?
-                "spreadout_reserved_angle": None,  # how much of a angular space does the previous connection take?
             } for e in sorted_node_tab
         }
-        current_node_ = sorted_node_tab[0]
 
         node_map, lines = self.draw_nodes_on_circumference(node_map, nodes_count=len(nodes_with_connections))
 
@@ -404,8 +334,13 @@ class Graph2CutVisualizer:
                 zorder=0
             ))
 
-        plt.show()
-        # fig.savefig(fname='example_graph_image.png', dpi=300)
+        if isinstance(save_params, dict):
+            fig.savefig(
+                fname=str(save_params.get("image_name", "example"))+".png",
+                dpi=save_params.get("image_dpi", 300)
+            )
+        else:
+            plt.show()
 
 
 if __name__ == '__main__':
@@ -419,6 +354,4 @@ if __name__ == '__main__':
 
     visualiser = Graph2CutVisualizer(graph_solver=solver)
     visualiser.draw_graph(present_solution=True, select_good=True)
-    # visualiser = Graph2CutVisualizer(nodes=nodes_, edge_list=edges)
-    # visualiser.draw_graph(draw_type="circle")
 
