@@ -4,7 +4,7 @@ Everything related to grover search algorithm for quantum computations
 A collection of tools designed to automate quantum circuit creation for solving problems described below.
 Solutions are made in ``qiskit`` library.
 
-Recently I added another tool to the toolbox, which draws a graph structure with the use of ``matplotlib``.
+There is also one more tool in the toolbox, which draws a graph structure with the use of ``matplotlib``.
 One can pass a solver instance directly for automatic solution selection and drawing!
 
 ### some information about graph coloring problem
@@ -99,7 +99,7 @@ solver.solve(shots=10000, diffusion_iterations=1)
 solver.solution_analysis()
 
 visualiser = graph_visualizer.Graph2CutVisualizer(graph_solver=solver)
-visualiser.draw_graph(present_solution=True, select_good=True, draw_type="circle")
+visualiser.draw_graph(present_solution=True, select_good=True)
 ```
 
 It is also possible to draw the graph itself, without the need to solve it. You could do something along the 
@@ -114,7 +114,7 @@ edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
 
 
 visualiser = graph_visualizer.Graph2CutVisualizer(nodes=nodes_, edge_list=edges)
-visualiser.draw_graph(draw_type="circle")
+visualiser.draw_graph()
 ```
 
 ### Results

@@ -14,7 +14,7 @@ class Graph2Cut:
     ALLOWED_OPTIMIZERS = ["gates", "qbits"]
     ALLOWED_CONDITIONS = ["="]
 
-    def __init__(self, nodes: int, edge_list: list[tuple[int] | list[int]], cuts_number: int = None,
+    def __init__(self, nodes: int, edge_list: list[tuple[int, int] | list[int, int]], cuts_number: int = None,
                  condition: str = None, optimization: str = None):
         """
         Perform a graph splitting, based on the graph coloring problem. Only 2 colors are supported by this solver
@@ -396,7 +396,7 @@ class Graph2Cut:
         if shots is None:
             raise RuntimeError('shots is a mandatory parameter for this task')
         if shots <= 0:
-            raise RuntimeError("shots number must be an integer grater than 0")
+            raise RuntimeError("shots number must be an integer greater than 0")
         self.diffusion_steps = diffusion_iterations
         if self.optimization == "gates":
             self.construct_circuit_g(diffusion_iterations=diffusion_iterations)

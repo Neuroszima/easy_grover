@@ -58,7 +58,6 @@ class ConstructorTester(unittest.TestCase):
         then adds different edges to make a graph appear more interconnected than it starts from, looking
         back if there is no repeat among already connected edges.
 
-
         :param chain_only: a check that forces a graph to only include single chain of all nodes connected
         :return: tuple -> (number of possible edges, list of edges representing graph structure)
         """
