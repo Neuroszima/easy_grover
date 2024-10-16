@@ -199,7 +199,7 @@ class ConstructorTester(unittest.TestCase):
             if i > 100:
                 break
 
-            # if we didn't check all adjacent connections, color all of the edges in different color, or check if
+            # if we didn't check all adjacent connections, color all the edges in different color, or check if
             # there is any already applied
             if not node_dict[current_node]["checked"]:
                 for node in node_dict[current_node]["connection_list"]:

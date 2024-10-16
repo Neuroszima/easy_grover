@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import Optional
 from math import floor, log2
 
@@ -7,6 +8,9 @@ from qiskit_aer.backends import AerSimulator
 from qiskit.circuit import ControlledGate
 from qiskit.circuit.library.standard_gates import XGate
 from qiskit.circuit.quantumregister import Qubit
+
+from qiskit.transpiler import PassManager
+from qiskit.transpiler.passes import Unroll3qOrMore
 
 
 class Graph2Cut:
@@ -60,22 +64,37 @@ class Graph2Cut:
         # The most complex (n-C)X has to satisfy the qbit index of the last qbit expressing
         # the most significant power-of-2 bit in classical meaning
         # THIS MAPPING STARTS FROM "1" AS STARTING INDEX
+        self._qbits_total = 0  # uninitialized state
         for index, _ in enumerate(self.quantum_adder_register):
             self.controlled_gate_dict[index+1] = XGate().control(index+1)
+        self._gates_total: Optional[int, OrderedDict] = 0
+        self.possible_answers: Optional[list[tuple[str, int]]] = None
+        self.diffusion_steps = 0
+
+    @staticmethod
+    def transform_graph_representation(repres_) -> list:
+        """stub method for transforming graph representation from np.ndarray 2D matrix into list of edges"""
+        pass
+
+    def size(self):
+        """
+        get basic information about solution cost
+        uses circuit translator to unroll >3q-controlled gates, to gauge the performance on actual QC
+        """
+        if isinstance(self.circuit, QuantumCircuit):
+            pass_manager = PassManager(Unroll3qOrMore(basis_gates=['cx', 'u3']))
+            new_circuit = pass_manager.run(self.circuit)
+            self._gates_total: OrderedDict = new_circuit.count_ops()
+
         regiters = [
             self.node_qbit_register, self.edge_qbit_register,
             self.quantum_adder_register, self.ancilla_qbit_register
         ]
         self._qbits_total = sum([len(register) if register else 0 for register in regiters])
-        self._gates_total = 0
-        self.possible_answers: Optional[list[tuple[str, int]]] = None
-        self.diffusion_steps = 0
-
-    def size(self):
         return {
             "c_bits": self.results_register.size,
             "q_bits": self._qbits_total,
-            "instruction_count": "unable to calculate"  # self._gates_total
+            "base_instruction_count": self._gates_total  # unable to calculate
         }
 
     def _minimal_adder_size(self):
@@ -99,10 +118,10 @@ class Graph2Cut:
         Generates a circuit part, that is responsible for flagging nodes that are connected.
 
         those will be flagged by converting qbit into state "|1>" when a color mismatch event happen
-        (one of qbits will flip the node qbit state with CX into |1>,
-        while the other, being |0>, will not reverse it into |0> again)
+        (one of qubits will flip the node qbit state with CX into |1>, while the other, being |0>, will
+        not reverse it into |0> again). This is a part of procedure known as "quantum counting"
 
-        This part only triggers when selected optimization is "gates"
+        This very method only triggers when selected optimization is "gates"
         """
         edge_flagging_circuit_ = QuantumCircuit(self.node_qbit_register, self.edge_qbit_register)
 
@@ -491,3 +510,4 @@ if __name__ == '__main__':
     cut.solution_analysis(verbose=False)
     print(cut.counts)
     print("\nproposed answers:\n", cut.possible_answers)
+    print(cut.size())
