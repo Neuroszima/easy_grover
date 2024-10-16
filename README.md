@@ -54,10 +54,10 @@ from graph_coloring import circuit_constructor
 graph_nodes = 3
 edges = [(0, 1), (1, 2)]
 graph_cutter = circuit_constructor.Graph2Cut(
-    nodes=graph_nodes,
-    edge_list=edges,
-    cuts_number=len(edges),
-    condition="="
+   nodes=graph_nodes,
+   edges=edges,
+   cuts_number=len(edges),
+   condition="="
 )
 ```
 
@@ -100,6 +100,44 @@ solver.solution_analysis()
 
 visualiser = graph_visualizer.Graph2CutVisualizer(graph_solver=solver)
 visualiser.draw_graph(present_solution=True, select_good=True)
+```
+
+<b>NEW:</b> Added solution cost calculations:
+
+```python
+from graph_coloring import circuit_constructor, graph_visualizer
+from pprint import pprint
+
+nodes_ = 10
+edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+
+solver = circuit_constructor.Graph2Cut(
+   nodes_, edges, cuts_number=len(edges)-6, optimization='qbits')
+solver.solve(shots=10000, diffusion_iterations=1)
+pprint(solver.size())
+```
+
+```
+{'base_instruction_count': 
+      OrderedDict([
+          ('cx', 1798),
+          ('h', 718),
+          ('p', 635),
+          ('t', 448),
+          ('tdg', 358),
+          ('u1', 288),
+          ('cu1', 162),
+          ('u2', 144),
+          ('unitary', 96),
+          ('x', 24),
+          ('measure', 10),
+          ('barrier', 7),
+          ('crz', 5),
+          ('z', 1)
+      ]),
+ 'c_bits': 10,
+ 'q_bits': 17}
 ```
 
 It is also possible to draw the graph itself, without the need to solve it. You could do something along the 

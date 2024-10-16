@@ -1,15 +1,13 @@
 import unittest
 from collections import OrderedDict
-from itertools import pairwise
-# from pprint import pprint
-from random import shuffle, choice, seed, randint
+from itertools import pairwise, combinations
+from random import shuffle, choice, seed, randint, choices
 from copy import deepcopy
 from math import floor, log2, sqrt, pi
-from time import time
 
-# from qiskit.circuit import CircuitInstruction
+from numpy import array
 
-from circuit_constructor import Graph2Cut
+from graph_coloring.circuit_constructor import Graph2Cut
 from qiskit import QuantumRegister, QuantumCircuit, ClassicalRegister
 from qiskit_aer.backends import AerSimulator
 
@@ -52,6 +50,32 @@ class ConstructorTester(unittest.TestCase):
         return qubit_gate_usage_list
 
     @staticmethod
+    def matrix_graph_constructor(node_number, fully_connected=False):
+        """
+        for the usage in simple tests, construct a matrix representation of a random graph
+        this method does not care about lower left half of the matrix ("below diagonal"), it just
+        generates a matrix and changes it into np.ndarray type
+        """
+        if node_number < 2:
+            raise ValueError("cannot create proper graph for testing with less than 2 nodes")
+
+        connection_list = []
+        if fully_connected:
+            graph_matrix = [[1 for _ in range(node_number)] for _ in range(node_number)]
+        else:
+            graph_matrix = [choices([1, 0], k=node_number) for _ in range(node_number)]
+        for i in range(node_number):
+            for j in range(node_number):
+                if all([
+                    graph_matrix[i][j],
+                    tuple((i, j)) not in connection_list,
+                    i < j
+                ]):
+                    connection_list.append((i, j))
+
+        return array(graph_matrix), connection_list
+
+    @staticmethod
     def graph_constructor(node_number, chain_only=False) -> tuple:
         """
         makes a fully connected graph with (at least) all nodes connected in a chain
@@ -67,9 +91,7 @@ class ConstructorTester(unittest.TestCase):
         # prepare base chain
         node_list = [i for i in range(node_number)]
         shuffle(node_list)
-        start_nodes = node_list[:-1]
-        end_nodes = node_list[1:]
-        starting_edges = [(s_node, e_node) for s_node, e_node in zip(start_nodes, end_nodes)]
+        starting_edges = [*pairwise(node_list)]
 
         if chain_only:
             solution_node_sequence = [
@@ -80,14 +102,14 @@ class ConstructorTester(unittest.TestCase):
             return starting_edges, solution[::-1]
 
         # until condition is met, add another couple connections to the graph
-        total_edges = deepcopy(starting_edges)
+        edges = deepcopy(starting_edges)
         i = 0
-        while len(total_edges) < int(0.68 * all_possibilities):
+        while len(edges) < int(0.68 * all_possibilities):
             # randomly propose a candidate
             shuffle(node_list)
             edge = (node_list[0], node_list[1])
-            if edge not in total_edges and edge[::-1] not in total_edges:
-                total_edges.append(edge)
+            if edge not in edges and edge[::-1] not in edges:
+                edges.append(edge)
 
             # sanity check - too many random failures
             i += 1
@@ -95,10 +117,10 @@ class ConstructorTester(unittest.TestCase):
                 break
 
         # here solution does not matter that much, so "None" is ok
-        return total_edges, None
+        return edges, None
 
     @staticmethod
-    def graph_with_certain_solution(node_number) -> tuple:
+    def graph_with_certain_solution(node_number) -> tuple[list, str]:
         """
         take a number of nodes, mix them up into 2 piles, colour them and connect in edges to make a final
         graph with at least 1 valid solution
@@ -161,7 +183,7 @@ class ConstructorTester(unittest.TestCase):
     def graph_with_no_solution(self, node_number):
         """mess up a normally bipartite graph by including an extra edge into graph structure"""
         edges, str_solution = self.graph_with_certain_solution(node_number)
-        str_solution: str
+        # str_solution: str
 
         str_solution = str_solution[::-1]
         print(str_solution)
@@ -294,6 +316,29 @@ class ConstructorTester(unittest.TestCase):
             answer, check_solution = self.check_bipartiteness(node_count, edges)
             self.assertEqual(answer, False)
 
+    def test_matrix_graph_constructor(self):
+        """
+        test if internal testing tool (matrix constructor with translation) works properly, creating matrices and
+        lists of edges as it should
+        """
+        # test fully connected graphs
+        fc_graphs = [[*combinations([*range(node_number)], r=2)] for node_number in range(4, 8)]
+        graphs_with_list = [
+            self.matrix_graph_constructor(node_number=node_number, fully_connected=True) for node_number in range(4, 8)
+        ]
+        for (combination_result, (_, graph_result)) in zip(fc_graphs, graphs_with_list):
+            self.assertEqual(combination_result, graph_result)
+
+        # test random graphs translation
+        graphs_with_list_rand = [
+            self.matrix_graph_constructor(node_number=node_number) for node_number in range(4, 8)
+        ]
+        for matrix, conn_list in graphs_with_list_rand:
+            for i in range(matrix.shape[0]):
+                for j in range(matrix.shape[0]):
+                    if j > i and matrix[i][j]:
+                        self.assertIn(tuple((i, j)), conn_list)
+
     def test_adder_size(self):
         """
         test adder size allocator function. It should allocate proper number of qbits for any graph
@@ -333,7 +378,7 @@ class ConstructorTester(unittest.TestCase):
         only consist a single chain of edges (no other interconnections)
         """
         for nodes, edges, _ in self.random_chain_graphs:
-            test_circuit_builder = Graph2Cut(nodes, edge_list=edges, cuts_number=len(edges), condition='=')
+            test_circuit_builder = Graph2Cut(nodes, edges=edges, cuts_number=len(edges), condition='=')
             test_circuit_builder._allocate_qbits()
             self.assertEqual(len(test_circuit_builder.quantum_adder_register), floor(log2(nodes-1))+1)
             self.assertEqual(len(test_circuit_builder.edge_qbit_register), len(edges))
@@ -356,7 +401,7 @@ class ConstructorTester(unittest.TestCase):
 
         nodes = 8
         chain_graph, __ = self.graph_constructor(nodes, chain_only=True)
-        graph_cutter = Graph2Cut(nodes=nodes, edge_list=chain_graph, cuts_number=len(chain_graph))
+        graph_cutter = Graph2Cut(nodes=nodes, edges=chain_graph, cuts_number=len(chain_graph))
         test_circuit_book = graph_cutter.assemble_subcircuits()
         edge_checker_subcircuit = test_circuit_book[0]
         c_register = ClassicalRegister(graph_cutter.edge_qbit_register.size, name="test_register")
@@ -394,7 +439,7 @@ class ConstructorTester(unittest.TestCase):
         # 1 - node color mismatch -> a cut; 0 - node color matching -> no cut
         random_graph = self.random_graphs_[4]
         nodes, edges, _ = random_graph
-        graph_cutter = Graph2Cut(nodes=nodes, edge_list=edges, cuts_number=len(edges))
+        graph_cutter = Graph2Cut(nodes=nodes, edges=edges, cuts_number=len(edges))
         sub_circuit_book = graph_cutter.assemble_subcircuits()
         adder_circuit = sub_circuit_book[1]
 
@@ -437,7 +482,7 @@ class ConstructorTester(unittest.TestCase):
         """
         graph = self.random_chain_graphs[4]
 
-        graph_cutter = Graph2Cut(nodes=graph[0], edge_list=graph[1], cuts_number=len(graph[1]), optimization='qbits')
+        graph_cutter = Graph2Cut(nodes=graph[0], edges=graph[1], cuts_number=len(graph[1]), optimization='qbits')
         sub_circuit_book = graph_cutter.assemble_subcircuits()
         edge_counting_subcircuits: list[list[int | QuantumCircuit | ...]] = sub_circuit_book[0]
         test_cases = ["00", "01", "10", "11"]
@@ -506,7 +551,7 @@ class ConstructorTester(unittest.TestCase):
 
         for node_count, edges, solution in chains:
             maximum_bipartiteness_diffusion_count = floor(pi / 4 * sqrt(2 ** node_count / 2))
-            cut = Graph2Cut(node_count, edge_list=edges, cuts_number=len(edges), optimization="gates")
+            cut = Graph2Cut(node_count, edges=edges, cuts_number=len(edges), optimization="gates")
             cut.construct_circuit_g(diffusion_iterations=maximum_bipartiteness_diffusion_count)
             cut.schedule_job_locally(seed_simulator=self.seed_simulator)
             # print(cut.counts, cut.size())
@@ -538,7 +583,7 @@ class ConstructorTester(unittest.TestCase):
 
         for node_count, edges, solution in chains:
             maximum_bipartiteness_diffusion_count = floor(pi/4 * sqrt(2**node_count/2))
-            cut = Graph2Cut(node_count, edge_list=edges, cuts_number=len(edges), optimization="qbits")
+            cut = Graph2Cut(node_count, edges=edges, cuts_number=len(edges), optimization="qbits")
             cut.construct_circuit_q(diffusion_iterations=maximum_bipartiteness_diffusion_count)
             cut.schedule_job_locally(seed_simulator=self.seed_simulator)
             self.assertIn(solution, cut.counts, msg=assertion_error_message_1)
@@ -581,7 +626,7 @@ class ConstructorTester(unittest.TestCase):
         for nodes, edge_list, solution in self.certain_solution_graphs:
             diffusions = floor(sqrt(2**nodes/2) * pi/4)
             # print(nodes, edge_list, solution, diffusions)
-            solver = Graph2Cut(nodes, edge_list=edge_list, optimization="qbits")
+            solver = Graph2Cut(nodes, edges=edge_list, optimization="qbits")
             solver.solve(shots=1000, seed_simulator=self.seed_simulator, diffusion_iterations=diffusions)
             solver.solution_analysis()
             solutions = [a[0] for a in solver.possible_answers]
@@ -624,9 +669,9 @@ class ConstructorTester(unittest.TestCase):
                     edge_list.pop()
             # print(nodes, edge_list)
             gate_optimized_solver = Graph2Cut(
-                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list)-2, optimization='gates')
+                nodes=nodes, edges=edge_list, cuts_number=len(edge_list) - 2, optimization='gates')
             qbit_optimized_solver = Graph2Cut(
-                nodes=nodes, edge_list=edge_list, cuts_number=len(edge_list)-2, optimization='qbits')
+                nodes=nodes, edges=edge_list, cuts_number=len(edge_list) - 2, optimization='qbits')
             # print(gate_optimized_solver.size())
             # print(qbit_optimized_solver.size())
             gate_optimized_solver.solve(shots=self.shots, seed_simulator=self.seed_simulator)
