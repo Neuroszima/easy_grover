@@ -65,12 +65,8 @@ class ConstructorTester(unittest.TestCase):
         else:
             graph_matrix = [choices([1, 0], k=node_number) for _ in range(node_number)]
         for i in range(node_number):
-            for j in range(node_number):
-                if all([
-                    graph_matrix[i][j],
-                    tuple((i, j)) not in connection_list,
-                    i < j
-                ]):
+            for j in range(i+1, node_number):
+                if graph_matrix[i][j]:
                     connection_list.append((i, j))
 
         return array(graph_matrix), connection_list
@@ -306,7 +302,7 @@ class ConstructorTester(unittest.TestCase):
         # self.random_graphs_ = [(nodes, *self.graph_constructor(nodes)) for nodes in range(4, 8)]
 
     def test_deterministic_graph_solver(self):
-        """test if solver works properly"""
+        """test if internal testing solver works properly"""
         for node_count, edges, solution in self.certain_solution_graphs:
             answer, check_solution = self.check_bipartiteness(node_count, edges)
             mirrored_solution = ''.join(["0" if c == "1" else "1" for c in check_solution])
@@ -327,6 +323,7 @@ class ConstructorTester(unittest.TestCase):
             self.matrix_graph_constructor(node_number=node_number, fully_connected=True) for node_number in range(4, 8)
         ]
         for (combination_result, (_, graph_result)) in zip(fc_graphs, graphs_with_list):
+            print(combination_result, graph_result)
             self.assertEqual(combination_result, graph_result)
 
         # test random graphs translation
@@ -334,10 +331,33 @@ class ConstructorTester(unittest.TestCase):
             self.matrix_graph_constructor(node_number=node_number) for node_number in range(4, 8)
         ]
         for matrix, conn_list in graphs_with_list_rand:
+            print(matrix, conn_list)
             for i in range(matrix.shape[0]):
                 for j in range(matrix.shape[0]):
                     if j > i and matrix[i][j]:
                         self.assertIn(tuple((i, j)), conn_list)
+                    else:
+                        self.assertNotIn(tuple((i, j)), conn_list)
+
+    def test_matrix_translator(self):
+        """
+        test if dedicated transformation method works, for translating matrix graph representation to
+        list representation
+        """
+        # fc_graphs = [[*combinations([*range(node_number)], r=2)] for node_number in range(4, 8)]
+        graphs_with_list = [
+            self.matrix_graph_constructor(node_number=node_number, fully_connected=True) for node_number in range(4, 8)
+        ]
+        graphs_with_list_rand = [
+            self.matrix_graph_constructor(node_number=node_number) for node_number in range(4, 8)
+        ]
+
+        for matrix, edge_list in graphs_with_list:
+            e_list = Graph2Cut.translate_matrix_representation(matrix)
+            self.assertEqual(edge_list, e_list)
+        for matrix, edge_list in graphs_with_list_rand:
+            e_list = Graph2Cut.translate_matrix_representation(matrix)
+            self.assertEqual(edge_list, e_list)
 
     def test_adder_size(self):
         """

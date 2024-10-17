@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from pprint import pprint
 from typing import Optional
 from math import floor, log2
 
@@ -12,14 +13,17 @@ from qiskit.circuit.quantumregister import Qubit
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import Unroll3qOrMore
 
+from numpy import ndarray
+
 
 class Graph2Cut:
 
     ALLOWED_OPTIMIZERS = ["gates", "qbits"]
     ALLOWED_CONDITIONS = ["="]
 
-    def __init__(self, nodes: int, edge_list: list[tuple[int, int] | list[int, int]], cuts_number: int = None,
-                 condition: str = None, optimization: str = None):
+    def __init__(self, nodes: int,
+                 edges: list[tuple[int, int] | list[int, int]] | ndarray,
+                 cuts_number: int = None, condition: str = None, optimization: str = None):
         """
         Perform a graph splitting, based on the graph coloring problem. Only 2 colors are supported by this solver
 
@@ -33,13 +37,18 @@ class Graph2Cut:
         Note: determine the notation order in which answers are served and understand its meaning
 
         :param nodes: total number of graph members
-        :param edge_list: list of 2-member tuples/iterables, that represents graph structure
+        :param edges: list of 2-member tuples/iterables, that represents graph structure
         :param cuts_number: len(edge_list) is the default
         :param condition: "=" is default
         :param optimization: "gates" or "qbits" are possible modifiers ("gates" is default)
         """
         self.graph_nodes = nodes
-        self.edge_list = edge_list
+        if isinstance(edges, ndarray):
+            self.edge_list = self.translate_matrix_representation(edges)
+        elif isinstance(edges, (list, tuple)):
+            self.edge_list = edges
+        else:
+            raise TypeError(f"edges has to be list/tuple of pairs of nodes, or 2D matrix, not {type(edges)}")
         self.cuts_number = len(self.edge_list) if cuts_number is None else cuts_number
         if condition not in [*self.ALLOWED_CONDITIONS, None]:
             raise NotImplementedError("other types of comparisons other than '=' are not supported yet")
@@ -64,17 +73,36 @@ class Graph2Cut:
         # The most complex (n-C)X has to satisfy the qbit index of the last qbit expressing
         # the most significant power-of-2 bit in classical meaning
         # THIS MAPPING STARTS FROM "1" AS STARTING INDEX
-        self._qbits_total = 0  # uninitialized state
         for index, _ in enumerate(self.quantum_adder_register):
             self.controlled_gate_dict[index+1] = XGate().control(index+1)
+
+        # uninitialized state
         self._gates_total: Optional[int, OrderedDict] = 0
         self.possible_answers: Optional[list[tuple[str, int]]] = None
         self.diffusion_steps = 0
+        self._qbits_total = 0
 
     @staticmethod
-    def transform_graph_representation(repres_) -> list:
-        """stub method for transforming graph representation from np.ndarray 2D matrix into list of edges"""
-        pass
+    def translate_matrix_representation(matrix: ndarray) -> list:
+        """
+        method for transforming graph representation from np.ndarray 2D matrix into list of edges
+        method always takes upper right part of the matrix into consideration (symmetry assumed), with respect
+        to diagonal
+
+        when non-symmetric matrix is passed, the lower left part is ignored and does not throw an error
+        self-references in the graph (diagonals) are also ignored
+        """
+        # direction at which our graphs edges are oriented does not matter.
+        # we always take symmetrical approach, so only one part of matrix is used
+        if len(matrix.shape) != 2:
+            raise ValueError("matrix form of graph should be of 2D shape")
+        i = 0
+        conn_list = []
+        while i < matrix.shape[0]:
+            j = i + 1
+            conn_list.extend([(i, x) for x in range(j, matrix.shape[0]) if matrix[i][x]])
+            i += 1
+        return conn_list
 
     def size(self):
         """
@@ -510,4 +538,4 @@ if __name__ == '__main__':
     cut.solution_analysis(verbose=False)
     print(cut.counts)
     print("\nproposed answers:\n", cut.possible_answers)
-    print(cut.size())
+    pprint(cut.size())
