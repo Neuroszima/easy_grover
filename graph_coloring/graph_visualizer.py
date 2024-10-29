@@ -101,7 +101,7 @@ class Graph2CutVisualizer:
             gamma = (180 - (360/nodes_count))/2
             gamma_p = 90 - gamma
             distance = self.edge_length * cos(pi * gamma_p / 180) / cos(pi * (gamma - gamma_p) / 180)
-            print("in draw_circ.; values:")
+            print("in draw_on_circ.; values:")
             print(gamma, gamma_p, distance)
         else:
             raise ValueError(f"improper number of nodes: {nodes_count}")

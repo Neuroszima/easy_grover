@@ -1,8 +1,11 @@
+import warnings
 from collections import OrderedDict
 from pprint import pprint
 from typing import Optional
 from math import floor, log2
 
+import numpy as np
+from matplotlib import pyplot as plt
 # import qiskit.circuit.library
 from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit
 from qiskit_aer.backends import AerSimulator
@@ -21,9 +24,9 @@ class Graph2Cut:
     ALLOWED_OPTIMIZERS = ["gates", "qbits"]
     ALLOWED_CONDITIONS = ["="]
 
-    def __init__(self, nodes: int,
-                 edges: list[tuple[int, int] | list[int, int]] | ndarray,
-                 cuts_number: int = None, condition: str = None, optimization: str = None):
+    def __init__(self, nodes: int, edges: list[tuple[int, int] | list[int, int]] | ndarray,
+                 cuts_number: int = None, condition: str = None, optimization: str = None,
+                 allow_experimental_runs=False, hardware_simulation_memory_limit: str | None = None):
         """
         Perform a graph splitting, based on the graph coloring problem. Only 2 colors are supported by this solver
 
@@ -41,7 +44,11 @@ class Graph2Cut:
         :param cuts_number: len(edge_list) is the default
         :param condition: "=" is default
         :param optimization: "gates" or "qbits" are possible modifiers ("gates" is default)
+        :param allow_experimental_runs: allows modes and conditions that could result in program errors
+        :param hardware_simulation_memory_limit: this param sets RAM usage when interacting with Aer backend
+            ("8GB" default, set lower if you have lower end hardware)
         """
+        self.allow_experimental_runs = allow_experimental_runs
         self.graph_nodes = nodes
         if isinstance(edges, ndarray):
             self.edge_list = self.translate_matrix_representation(edges)
@@ -50,13 +57,32 @@ class Graph2Cut:
         else:
             raise TypeError(f"edges has to be list/tuple of pairs of nodes, or 2D matrix, not {type(edges)}")
         self.cuts_number = len(self.edge_list) if cuts_number is None else cuts_number
-        if condition not in [*self.ALLOWED_CONDITIONS, None]:
+        self.max_cut = len(self.edge_list)
+
+        if allow_experimental_runs:
+            warnings.warn(
+                "if used with unsupported modes or conditions, this can yield errors use at own risk"
+            )
+
+        if allow_experimental_runs:
+            self.condition = condition
+            self.min_range, self.max_range = self._checked_ranges(cuts_number, condition)
+        elif condition in [*self.ALLOWED_CONDITIONS, None]:
+            self.condition = "=" if condition is None else condition
+            self.min_range, self.max_range = self._checked_ranges(cuts_number, self.condition)
+        else:
             raise NotImplementedError("other types of comparisons other than '=' are not supported yet")
-        self.condition = "=" if condition is None else condition
-        if optimization in [*self.ALLOWED_OPTIMIZERS, None]:
+
+        if allow_experimental_runs:
+            self.optimization = optimization
+        elif optimization in [*self.ALLOWED_OPTIMIZERS, None]:
             self.optimization = "gates" if optimization is None else optimization
         else:
             raise NotImplementedError(f'optimization: {optimization} not recognized as valid optimization')
+
+        self.hardware_mem_limit = "8GB" if hardware_simulation_memory_limit is None \
+            else hardware_simulation_memory_limit
+
         self.circuit: Optional[QuantumCircuit] = None
         self.node_qbit_register: Optional[QuantumRegister] = None
         self.edge_qbit_register: Optional[QuantumRegister] = None
@@ -104,10 +130,12 @@ class Graph2Cut:
             i += 1
         return conn_list
 
-    def size(self):
+    def size(self, as_dict=True):
         """
         get basic information about solution cost
         uses circuit translator to unroll >3q-controlled gates, to gauge the performance on actual QC
+
+        :param as_dict: forces to return value, otherwise prints it out in beautified form
         """
         if isinstance(self.circuit, QuantumCircuit):
             pass_manager = PassManager(Unroll3qOrMore(basis_gates=['cx', 'u3']))
@@ -119,14 +147,48 @@ class Graph2Cut:
             self.quantum_adder_register, self.ancilla_qbit_register
         ]
         self._qbits_total = sum([len(register) if register else 0 for register in regiters])
-        return {
+        d = {
             "c_bits": self.results_register.size,
             "q_bits": self._qbits_total,
             "base_instruction_count": self._gates_total  # unable to calculate
         }
+        if as_dict:
+            return d
+        else:
+            for key in d:
+                if key == "base_instruction_count":
+                    print("%s: {" % key)
+                    for k_ in d[key]:
+                        print(f"    {k_}: {d[key][k_]},")
+                    print("}")
+                else:
+                    print(f"{key}: {d[key]},")
+
+    def _simulation_memory_usage_limit(self) -> int:
+        """calculates how many MB of memory to use when specified"""
 
     def _minimal_adder_size(self):
         return floor(log2(len(self.edge_list)))+1
+
+    def _checked_ranges(self, cuts_number, condition):
+        """set brackets for """
+        if condition == ">":
+            min_range = cuts_number + 1
+            max_range = len(self.edge_list)
+        elif condition == ">=":
+            min_range = cuts_number
+            max_range = len(self.edge_list)
+        elif condition == "<":
+            max_range = cuts_number - 1
+            min_range = 0
+        elif condition == "<=":
+            max_range = cuts_number
+            min_range = 0
+        elif condition == "=":
+            max_range = min_range = cuts_number
+        else:
+            raise ValueError(f"improper condition: {condition}")
+        return min_range, max_range
 
     def _allocate_qbits(self):
         """
@@ -239,14 +301,144 @@ class Graph2Cut:
         # for equality, we flip the bits that should be "0" in the bitwise representation
         # of given integer, then we "AND" entire adder register together -> making sure all the bits are proper state
 
-        string_of_num = f"{bin(self.cuts_number)[2:]}".zfill(len(self.quantum_adder_register))
-        for index, digit in enumerate(reversed(string_of_num)):
+        bitstring = f"{bin(self.cuts_number)[2:]}".zfill(len(self.quantum_adder_register))
+        for index, digit in enumerate(reversed(bitstring)):
             # apply X wherever there is "0"
             if digit == "0":
                 checker_circuit.x(self.quantum_adder_register[index])
 
         MCXGate = XGate().control(len(self.quantum_adder_register))
         checker_circuit.append(MCXGate, [*self.quantum_adder_register, self.ancilla_qbit_register[-1]])
+        return checker_circuit
+
+    def _form_condition_check_from_bitstring(self, bitstring: str, checker_circuit: QuantumCircuit):
+        """
+        take a string of bits as an input; determine which qbits should be negated, and at the end, which
+        qbits should be checked against.
+
+        based on string contents:
+        1 -> check this qbit as is (include into control bits)
+        0 -> check negation of this qbit (include into control bits)
+        X -> do not check this qbit (i.e. this qbit can have any value, does not matter)
+        """
+        # from matplotlib import pyplot as plt
+        print(bitstring)
+        negate_array = []
+        control_qbits = []
+        for index, bit in enumerate(reversed(bitstring)):
+            if bit != "X":
+                control_qbits.append(self.quantum_adder_register[index])
+            if bit == "0":
+                negate_array.append(index)
+
+        print(f"stripped {bitstring.strip('X')}")
+        controls_count = len(bitstring.strip("X"))  # +1
+        MCXGate = XGate().control(controls_count)
+        # below -> the first control qbit that we should consider in 0101XXXXX case
+        # we should take all the controls after this one
+        try:
+            earlies_x_pos = bitstring.index("X")
+        except ValueError:
+            earlies_x_pos = len(bitstring)
+        control_state_begin = len(bitstring) - earlies_x_pos
+        print(controls_count)
+        print(control_state_begin)
+
+        # mark all the bits, use MCXGate as multi-check preparation, mark all the "correct states" with Z and reverse
+        print([*self.quantum_adder_register[control_state_begin:], self.ancilla_qbit_register[-1]])
+        for neg in negate_array:
+            checker_circuit.append(XGate(), [self.quantum_adder_register[neg]])
+        checker_circuit.append(MCXGate, [
+            *self.quantum_adder_register[control_state_begin:], self.ancilla_qbit_register[-1]])
+        checker_circuit.z(self.ancilla_qbit_register[-1])
+        checker_circuit.append(MCXGate, [
+            *self.quantum_adder_register[control_state_begin:], self.ancilla_qbit_register[-1]])
+        # mini bit-set reverse for the next check, but still prior to ZGate()
+        for neg in negate_array:
+            checker_circuit.append(XGate(), [self.quantum_adder_register[neg]])
+
+        # checker_circuit.draw(output='mpl')
+        # plt.show()
+
+        return checker_circuit
+
+    def _complex_condition_checking(self):
+        """
+        prepare a part of the circuit that makes up a condition for a phase flip for solutions space (into "-")
+
+        compared to simple condition checker, this one can handle ranges, as well as greater/lower than cases
+        """
+        # prepare several control gates based on cumulative coverage of all integers within the checked range
+
+        # base case that i thought in the beginning was to merge integer cases based on single bit difference
+        # for example (loose chain of thought):
+        #     len(edges) = 14
+        #     condition ->  "8>" (greater than 8)
+        #     sample integers from the range: 9, 10, 11, 12, 13, 14
+        #     bit repr(11) = 0b0000_1011  (i always base it off 8-bit, easier to think about)
+        #     bit repr(10) = 0b0000_1010  (i always base it off 8-bit, easier to think about)
+        #     example 11 and example 10 can be represented as 0b0000_101X where "X" is "whatever"
+        #     this means we can skip the last bit in check, redicing MCXGate count by 1 and control-bit by 1 as well,
+        #     at the same time covering both cases.
+        #     bit repr(12) = 0b0000_1100
+        #     bit repr(13) = 0b0000_1101
+        #        (12, 13) -> 0b0000_110X ...merged and so on, then merging "110X" representations into "11XX" and so on
+
+        # here we will use this exact method
+        if self.condition == ">":
+            r = range(self.cuts_number+1, self.max_cut+1)  # "+1" -> full
+        elif self.condition == ">=":
+            r = range(self.cuts_number, self.max_cut+1)
+        elif self.condition == "<=":
+            r = range(0, self.cuts_number+1)
+        elif self.condition == "<":
+            r = range(0, self.cuts_number)
+        else:
+            raise RuntimeError(
+                f"Can't formulate proper range to build conditional checker with this condition: {self.condition}")
+
+        # since we always check the last bit, we will successively remove neighbouring numbers with single
+        # bit of difference, and then leftshift afterward. This marks we found 2 numbers that can be checked with
+        # one condition.
+        # Do this process for as long as necessary.
+        # below, collection of tuples -> (number,
+        starting_conditions = [(i, 0) for i in r]
+        intermediate_conditions = []
+        changed = True
+        while changed:
+            print(f"{starting_conditions=}")
+            changed = False
+            while len(starting_conditions) > 1:
+                if ((starting_conditions[0][0] ^ starting_conditions[1][0]) == 1 and
+                        (starting_conditions[0][1] == starting_conditions[1][1])):
+                    # the same shift and single bit difference, due to being 1 away from each other
+                    intermediate_conditions.append(
+                        (starting_conditions[1][0] >> 1, starting_conditions[1][1] + 1)
+                    )
+                    starting_conditions.pop(0)
+                    starting_conditions.pop(0)
+                    changed = True
+                else:
+                    intermediate_conditions.append(starting_conditions.pop(0))
+                if len(starting_conditions) == 1:
+                    intermediate_conditions.append(starting_conditions.pop())
+            starting_conditions = intermediate_conditions
+            intermediate_conditions = []
+
+        # when "gate variety" is prepared, finally prepare a subcircuit
+        checker_circuit = QuantumCircuit(self.quantum_adder_register, self.ancilla_qbit_register)
+        checker_circuit.barrier()
+
+        for upper_bits, shift in starting_conditions:  # add every condition check with Z and immediate reverse
+            gate_definition = f"{bin(upper_bits)[2:]}" + "X"*shift
+            print(f"initial gate definition: {gate_definition}")
+            gate_definition = gate_definition.zfill(len(self.quantum_adder_register))
+            print(f"morphed gate definition: {gate_definition}")
+            checker_circuit = self._form_condition_check_from_bitstring(
+                bitstring=gate_definition, checker_circuit=checker_circuit)
+
+        checker_circuit.barrier()
+
         return checker_circuit
 
     def _add_single_edge(self, edge_index: int, edge_0_qbit, edge_1_qbit, ancilla_qbit):
@@ -289,7 +481,12 @@ class Graph2Cut:
     def assemble_subcircuits(self):
         """prepare all the useful sub-circuits to be merged into main one later"""
         diffusion_circuit = self._grover_diffusion()
-        condition_check_circuit = self._condition_checking()
+
+        if self.condition == "=":
+            condition_check_circuit = self._condition_checking()
+        else:
+            condition_check_circuit = self._complex_condition_checking()
+
         if self.optimization == "gates":
             edge_checking_circuit = self._edge_flagging()
             adder_circuit = self._adder()
@@ -309,7 +506,7 @@ class Graph2Cut:
             return adder_subcircuits_collection, diffusion_circuit, condition_check_circuit
         raise NotImplementedError(f"optimization method {self.optimization} not implemented as valid optimization")
 
-    def construct_circuit_g(self, diffusion_iterations=1):
+    def construct_circuit_g(self, diffusion_iterations=1, use_new_checker=False):
         """
         based on the iterations passed into this function, create a sequence of
         gates to be applied in the quantum circuit
@@ -344,14 +541,23 @@ class Graph2Cut:
             # oracle step
             self.circuit.compose(edge_checker, inplace=True)
             self.circuit.compose(adder, [*self.edge_qbit_register, *self.quantum_adder_register], inplace=True)
-            self.circuit.compose(
-                condition_checker, [*self.quantum_adder_register, self.ancilla_qbit_register[0]], inplace=True)
-            self.circuit.z(self.ancilla_qbit_register[0])
-            self.circuit.compose(
-                condition_checker.reverse_ops(),
-                [*self.quantum_adder_register, self.ancilla_qbit_register[0]],
-                inplace=True
-            )
+
+            # major internal change pending, old way left for previous compatibility
+            if not use_new_checker:
+                self.circuit.compose(
+                    condition_checker, [*self.quantum_adder_register, self.ancilla_qbit_register[0]], inplace=True)
+                self.circuit.z(self.ancilla_qbit_register[0])
+                self.circuit.compose(
+                    condition_checker.reverse_ops(),
+                    [*self.quantum_adder_register, self.ancilla_qbit_register[0]],
+                    inplace=True
+                )
+                self.circuit.draw(output='mpl')
+                plt.show()
+            else:
+                # this uses checker that is more robust and far more broad than simple one
+                self.circuit.compose(
+                    condition_checker, [*self.quantum_adder_register, self.ancilla_qbit_register[0]], inplace=True)
             self.circuit.compose(
                 adder.reverse_ops(), [*self.edge_qbit_register, *self.quantum_adder_register], inplace=True)
             self.circuit.compose(
@@ -362,8 +568,10 @@ class Graph2Cut:
 
         self.circuit.barrier()
         self.circuit.measure(qubit=self.node_qbit_register, cbit=self.results_register)
+        # self.circuit.draw(output='mpl')
+        # plt.show()
 
-    def construct_circuit_q(self, diffusion_iterations=1):
+    def construct_circuit_q(self, diffusion_iterations=1, use_new_checker=False):
         """
         this method acts the same as in "gate" optimization version.
         It constructs a circuit based on the fact, that we can save qubits from edge detection, and instead use
@@ -401,14 +609,24 @@ class Graph2Cut:
                 ], inplace=True)
             self.circuit.barrier()
 
-            self.circuit.compose(
-                condition_check_circuit, [*self.quantum_adder_register, *self.ancilla_qbit_register], inplace=True)
-            self.circuit.z(self.ancilla_qbit_register[1])
-            self.circuit.compose(
-                condition_check_circuit.reverse_ops(),
-                [*self.quantum_adder_register, *self.ancilla_qbit_register],
-                inplace=True
-            )
+            if not use_new_checker:
+                self.circuit.compose(
+                    condition_check_circuit,
+                    [*self.quantum_adder_register, *self.ancilla_qbit_register],
+                    inplace=True)
+                self.circuit.z(self.ancilla_qbit_register[1])
+                self.circuit.compose(
+                    condition_check_circuit.reverse_ops(),
+                    [*self.quantum_adder_register, *self.ancilla_qbit_register],
+                    inplace=True
+                )
+            else:
+                # new sub-circuit creating already has kickback step propagation through reverse ops baked in
+                self.circuit.compose(
+                    condition_check_circuit,
+                    [*self.quantum_adder_register, *self.ancilla_qbit_register],
+                    inplace=True)
+
             self.circuit.barrier()
 
             for edge_index, edge, subcircuit in adder_subcircuits_collection[::-1]:
@@ -446,9 +664,11 @@ class Graph2Cut:
             raise RuntimeError("shots number must be an integer greater than 0")
         self.diffusion_steps = diffusion_iterations
         if self.optimization == "gates":
-            self.construct_circuit_g(diffusion_iterations=diffusion_iterations)
+            self.construct_circuit_g(
+                diffusion_iterations=diffusion_iterations, use_new_checker=self.allow_experimental_runs)
         elif self.optimization == "qbits":
-            self.construct_circuit_q(diffusion_iterations=diffusion_iterations)
+            self.construct_circuit_q(
+                diffusion_iterations=diffusion_iterations, use_new_checker=self.allow_experimental_runs)
         self.schedule_job_locally(shots=shots, seed_simulator=seed_simulator)
         if verbose is None:
             verbose = False
@@ -460,15 +680,19 @@ class Graph2Cut:
         for proposal in sorted_answers:
             # since the answers from qiskit are ordered in reverse to how we check, reverse sequence and then check
             proposal_ = ("".join(reversed(proposal[0])), proposal[1])
-            allowed_edges = len(self.edge_list) - self.cuts_number
             color_matches = 0
             for edge in self.edge_list:
                 if proposal_[0][edge[0]] == proposal_[0][edge[1]]:
                     color_matches += 1
 
-            if color_matches ^ allowed_edges:
-                continue
-            self.possible_answers.append(proposal)
+            if self.condition == "=":
+                allowed_edges = len(self.edge_list) - self.cuts_number
+                if color_matches ^ allowed_edges:
+                    continue
+                self.possible_answers.append(proposal)
+            else:
+                if self.min_range <= color_matches <= self.max_range:
+                    self.possible_answers.append(proposal)
 
         if self.possible_answers:
             if len(self.possible_answers) == len(sorted_answers):
@@ -492,7 +716,7 @@ class Graph2Cut:
 
         if self.counts:
             sorted_answers = sorted([(ans, self.counts[ans]) for ans in self.counts], key=lambda x: x[1])[::-1]
-
+            print(f"all answers {sorted_answers=}")
             self.check_answers(sorted_answers)
 
             # special case of no answers will be visible by both solution and best rejected having
@@ -533,9 +757,23 @@ if __name__ == '__main__':
     edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
              [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
-    cut = Graph2Cut(nodes, edges, cuts_number=len(edges)-5, optimization="qbits")
-    cut.solve(shots=10000, diffusion_iterations=1)
-    cut.solution_analysis(verbose=False)
-    print(cut.counts)
-    print("\nproposed answers:\n", cut.possible_answers)
-    pprint(cut.size())
+    matrix_form = [
+        [0 for _ in range(nodes)] for _ in range(nodes)
+    ]
+    for i, j in edges:
+        matrix_form[i][j] = 1
+
+    # initialize through list
+    cut = Graph2Cut(nodes, edges, cuts_number=len(edges), optimization="gates")
+    cut.solve(shots=10000, diffusion_iterations=1, seed_simulator=100)
+
+    # initialize through numpy matrix
+    print(np.array(matrix_form))
+    matrix_cut = Graph2Cut(nodes, edges=np.array(matrix_form), cuts_number=len(edges), optimization="gates")
+    matrix_cut.solve(shots=10000, diffusion_iterations=1, seed_simulator=100)
+
+    assert matrix_cut.size() == cut.size()
+    assert matrix_cut.possible_answers == cut.possible_answers
+    cut.size(as_dict=False)
+    print("\nproposed answers:\n", matrix_cut.possible_answers)
+

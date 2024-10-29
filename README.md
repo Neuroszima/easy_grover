@@ -33,9 +33,11 @@ includes a stiff edge counting that is compared with a single value.
    compilation of the solution on different quantum computer brands (like Google, IBM, D-Wave and such...)
 5. Extending the automation tools for creating circuits to solve a k-cut problem - variable number of colors a 
    graph represents
-6. Functions that let one schedule jobs in actual IBM cloud on an actual quantum computer!
-7. Let program recognize and derive graph structure from numpy matrix notation. (not really directional graphs, 
-   rather just support notation).
+6. Functions that let one schedule jobs on actual IBM cloud on an actual quantum computer!
+7. :heavy_check_mark: Let program recognize and derive graph structure from numpy matrix notation. (not really 
+   directional graphs, rather just support notation).
+8. Let the program error out correctly when there is no available RAM for experiment ot be carried out on 
+   `AerSimulator`
 
 Note: for 7 - assume symmetric square array as an input to the solver. If not symmetric - either raise error,
 or ignore and read certain part of array to assume other is symmetric half.
@@ -102,42 +104,40 @@ visualiser = graph_visualizer.Graph2CutVisualizer(graph_solver=solver)
 visualiser.draw_graph(present_solution=True, select_good=True)
 ```
 
-<b>NEW:</b> Added solution cost calculations:
+<b>NEW:</b> Added solution cost calculations, exposed through **size()** method:
 
 ```python
-from graph_coloring import circuit_constructor, graph_visualizer
-from pprint import pprint
+from graph_coloring import circuit_constructor
 
 nodes_ = 10
 edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
           [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
 solver = circuit_constructor.Graph2Cut(
-   nodes_, edges, cuts_number=len(edges)-6, optimization='qbits')
+   nodes_, edges, cuts_number=len(edges)-5, optimization='qbits')
 solver.solve(shots=10000, diffusion_iterations=1)
-pprint(solver.size())
+solver.size(as_dict=False)  # prints out directly ot console
 ```
 
 ```
-{'base_instruction_count': 
-      OrderedDict([
-          ('cx', 1798),
-          ('h', 718),
-          ('p', 635),
-          ('t', 448),
-          ('tdg', 358),
-          ('u1', 288),
-          ('cu1', 162),
-          ('u2', 144),
-          ('unitary', 96),
-          ('x', 24),
-          ('measure', 10),
-          ('barrier', 7),
-          ('crz', 5),
-          ('z', 1)
-      ]),
- 'c_bits': 10,
- 'q_bits': 17}
+c_bits: 10,
+q_bits: 17,
+base_instruction_count: {
+    cx: 1798,
+    h: 718,
+    p: 635,
+    t: 448,
+    tdg: 358,
+    u1: 288,
+    cu1: 162,
+    u2: 144,
+    unitary: 96,
+    x: 24,
+    measure: 10,
+    barrier: 7,
+    crz: 5,
+    z: 1,
+}
 ```
 
 It is also possible to draw the graph itself, without the need to solve it. You could do something along the 
