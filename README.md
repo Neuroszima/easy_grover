@@ -21,7 +21,7 @@ includes a stiff edge counting that is compared with a single value.
 
 0. <b>important - fix "PendingDeprecationWarning" for ".get_num_ancilla_qubits()" used in tests</b>
 
-1. Restriction to check against single edge sum can be extended to any bracket. For example solutions that allow edges 
+1. :heavy_check_mark: Restriction to check against single edge sum can be extended to any bracket. For example solutions that allow edges 
    to signify connections between nodes of the same color can be allowed. In that case, it might be useful to 
    check a couple different values. We might construct a problem that reflects an example of "allow more 
    than 25 cuts to be performed", lets say, on a graph with a total of 30 connections between nodes.
@@ -70,7 +70,7 @@ then run your circuit.
 
 ```
 graph_cutter.construct_circuit(diffustion_iterations=2)
-# schedule_job_locally runs 'qasm_simulator' type of job on your PC
+# schedule_job_locally runs 'AerSimulator' type of job on your PC
 results = graph_cutter.schedule_job_locally()
 print(results)
 
@@ -83,9 +83,71 @@ one could run it using different simulator or send it to cloud. Alternatively on
 representation, though some more complicated designs may not be visualized correctly in mpl (or look absolutely 
 atrocious as text).
 
-### update
+**NEW FEATURE** It took me some time, but i was able to prepare an experimental feature, that takes not only 
+`condition="="` as parameter, but also 4 new identifiers: ">=", ">", "<=", "<". It will prepare a circuit for a case
+that respects, for example, a case where you would like to get all the answers that cover "more than XYZ graph cuts"
 
-Since it is now possible to visualize a graph itself, you could enhance the pipline by just
+To enable this behaviour, pass in desired conditional, and enable experimental mode like this:
+
+```python
+
+from graph_coloring import circuit_constructor
+
+nodes_ = 10
+edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+
+graph_cutter = circuit_constructor.Graph2Cut(
+   nodes=nodes_,
+   edges=edges,
+   cuts_number=len(edges),
+   condition=">",
+   optimization="qbits",
+   allow_experimental_runs=True
+)
+```
+
+If you are curious, how the gates are laid out in this particular case, you can see an example of this type of circuit
+by invoking `test_circ = Graph2Cut._complex_condition_checking()`, and check it out in mpl. Full code with most of the 
+features showcased, is in main file or below this paragraph:
+
+*cuts_number >= 9 "(len(edges) - 7 = 16 - 7 = 9)"*
+
+```python
+from graph_coloring import circuit_constructor
+from numpy import array
+from matplotlib import pyplot as plt
+
+nodes_ = 10
+edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
+          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+
+
+matrix_form = [
+    [0 for _ in range(nodes_)] for _ in range(nodes_)
+]
+for i, j in edges:
+    matrix_form[i][j] = 1
+
+matrix_cut_ge = circuit_constructor.Graph2Cut(
+    nodes_, edges=array(matrix_form), cuts_number=len(edges)-7, optimization="qbits",
+    condition=">=", allow_experimental_runs=True)
+matrix_cut_ge.solve(shots=10000, diffusion_iterations=1, seed_simulator=100)
+circ_test = matrix_cut_ge._complex_condition_checking()
+
+circ_test.draw(output='mpl')
+plt.show()
+```
+
+the assembly of check subcircuit is a bit optimized to reduce number of atomic conditionals -> reduce the 
+complexity of these check and usage of gates. It merges neighbouring binary numbers that are being checked 
+and one or 2 control bits are saved like this:
+
+![multicheck conditionals](./image_examples/multiple_case_greater_equal.png)
+
+### visualizer package
+
+If you'd like to visualize a graph itself, you could enhance the pipline by just
 extending it by appending 2 lines at the end of your script. You could do in a way similar to the one presented below:
 
 ```python

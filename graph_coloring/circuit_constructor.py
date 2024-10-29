@@ -756,6 +756,8 @@ if __name__ == '__main__':
     edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
              [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
+    print(f"{len(edges)=}")
+
     matrix_form = [
         [0 for _ in range(nodes)] for _ in range(nodes)
     ]
@@ -763,13 +765,25 @@ if __name__ == '__main__':
         matrix_form[i][j] = 1
 
     # initialize through list
-    cut = Graph2Cut(nodes, edges, cuts_number=len(edges), optimization="gates")
+    cut = Graph2Cut(nodes, edges, cuts_number=len(edges)-4, optimization="qbits")
     cut.solve(shots=10000, diffusion_iterations=1, seed_simulator=100)
 
     # initialize through numpy matrix
     print(np.array(matrix_form))
-    matrix_cut = Graph2Cut(nodes, edges=np.array(matrix_form), cuts_number=len(edges), optimization="gates")
+    matrix_cut = Graph2Cut(nodes, edges=np.array(matrix_form), cuts_number=len(edges)-4, optimization="qbits")
     matrix_cut.solve(shots=10000, diffusion_iterations=1, seed_simulator=100)
+
+    matrix_cut_ge = Graph2Cut(
+        nodes, edges=np.array(matrix_form), cuts_number=len(edges)-7, optimization="qbits",
+        condition=">=", allow_experimental_runs=True)
+    matrix_cut_ge.solve(shots=10000, diffusion_iterations=1, seed_simulator=100)
+    circ_test = matrix_cut_ge._complex_condition_checking()
+
+    circ_test.draw(output='mpl')
+    plt.show()
+
+    print(len(matrix_cut_ge.possible_answers))
+    print(len(matrix_cut_ge.counts))
 
     assert matrix_cut.size() == cut.size()
     assert matrix_cut.possible_answers == cut.possible_answers
