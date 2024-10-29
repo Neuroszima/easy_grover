@@ -691,7 +691,7 @@ class Graph2Cut:
                     continue
                 self.possible_answers.append(proposal)
             else:
-                if self.min_range <= color_matches <= self.max_range:
+                if self.min_range <= len(self.edge_list) - color_matches <= self.max_range:
                     self.possible_answers.append(proposal)
 
         if self.possible_answers:
@@ -716,7 +716,6 @@ class Graph2Cut:
 
         if self.counts:
             sorted_answers = sorted([(ans, self.counts[ans]) for ans in self.counts], key=lambda x: x[1])[::-1]
-            print(f"all answers {sorted_answers=}")
             self.check_answers(sorted_answers)
 
             # special case of no answers will be visible by both solution and best rejected having

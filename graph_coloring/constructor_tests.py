@@ -538,13 +538,15 @@ class ConstructorTester(unittest.TestCase):
             # will result in an error earlier during test
             self.assertEqual(predicted_instruction_subregisters, [])
 
-    def test_flag_by_condition(self):
+    def test_extended_conditionals(self):
         """
         test if condition sub-circuit really flags the state for given solution
         """
         node_count = solver_test_correct_answers["node_count"]
         edges = solver_test_correct_answers["edge_list"]
-        correct_answers = solver_test_correct_answers["colorings_per_cut_number"]
+        correct_answers = solver_test_correct_answers["solutions_per_cut_number"]
+        # original cases were solved with "=" conditional that worked correctly and iterated over
+        # this could be possible test improvement idea
         cases_1 = [
             # (cut_count, condition, correct_answers_list)
             (2, "<=", (0, 2), correct_answers["0"] + correct_answers["1"] + correct_answers["2"]),
@@ -558,85 +560,15 @@ class ConstructorTester(unittest.TestCase):
             solver = Graph2Cut(
                 nodes=node_count, edges=edges, optimization='gates', cuts_number=cut_count,
                 condition=condition, allow_experimental_runs=True)
-            sub_circ = solver._complex_condition_checking()
-            # solver._allocate_qbits()
-            # print(f"{len(solver.quantum_adder_register)=}\n{len(solver.ancilla_qbit_register)=}")
-            # tested_circuit = solver._complex_condition_checking()
-            # sub_circ.draw(output='mpl')
-            # plt.show()
-            # break
             solver.solve(shots=10000)
             solver.solution_analysis()
 
-            # experimental_solver = sorted([a[0] for a in solver.possible_answers])
-            experimental_solver = [
-                ('1010000', 456), ('0101111', 453), ('0101011', 449), ('0010000', 438), ('1110101', 434),
-                ('0001000', 433), ('1111101', 432), ('0101010', 429), ('0111111', 423), ('1010100', 423),
-                ('1111111', 418), ('1110111', 416), ('0100000', 415), ('0000000', 415), ('1010101', 408),
-                ('1000000', 404), ('1011111', 402), ('0001010', 402),
-                ('0000010', 402), ('1101111', 400), ('0101000', 398), ('1010111', 392)]
-            experimental_solver = sorted([a[0] for a in experimental_solver])
-            print(f"{experimental_solver=}")
-            print(f"{sorted_true_answers=}")
-            print(min_r, solver.min_range)
-            print(max_r, solver.max_range)
+            experimental_solver = sorted([a[0] for a in solver.possible_answers])
 
-            # following code will be cleaned up in future commits
-
-            # print("\nTRADITIONAL SOLVER 0\n")
-            #
-            # solver_equals = Graph2Cut(
-            #     nodes=node_count, edges=edges, optimization='gates', cuts_number=0, condition="="
-            # )
-            # solver_equals.solve(shots=10000)
-            # solver_equals.solution_analysis()
-            # circ_0 = solver_equals._condition_checking()
-            # solver_b = sorted([a[0] for a in solver_equals.possible_answers])
-            # # a = sorted(answers)
-            # print(solver_b)
-            # print(sorted_true_answers)
-            # print(min_r, solver_equals.min_range)
-            # print(max_r, solver_equals.max_range)
-            #
-            # print("\nTRADITIONAL SOLVER1\n")
-            #
-            # solver_equals = Graph2Cut(
-            #     nodes=node_count, edges=edges, optimization='gates', cuts_number=1, condition="="
-            # )
-            # solver_equals.solve(shots=10000)
-            # solver_equals.solution_analysis()
-            # circ_1 = solver_equals._condition_checking()
-            # solver_b = sorted([a[0] for a in solver_equals.possible_answers])
-            # # a = sorted(answers)
-            # print(solver_b)
-            # print(sorted_true_answers)
-            # print(min_r, solver_equals.min_range)
-            # print(max_r, solver_equals.max_range)
-            # print("\nTRADITIONAL SOLVER 2\n")
-            #
-            # solver_equals = Graph2Cut(
-            #     nodes=node_count, edges=edges, optimization='gates', cuts_number=2, condition="="
-            # )
-            # solver_equals.solve(shots=10000)
-            # solver_equals.solution_analysis()
-            # circ_2 = solver_equals._condition_checking()
-            # solver_b = sorted([a[0] for a in solver_equals.possible_answers])
-            # # a = sorted(answers)
-            # print(solver_b)
-            # print(sorted_true_answers)
-            # print(min_r, solver_equals.min_range)
-            # print(max_r, solver_equals.max_range)
-            # # solver.circuit.draw(output="mpl")
-            # # subcircuit_book = solver.assemble_subcircuits()
-            # subcircuit_book = [circ_0, circ_1, circ_2]
-            # for qc in subcircuit_book:
-            #     qc.draw(output='mpl')
-            #     plt.show()
-
-            # self.assertEqual(min_r, solver.min_range)
-            # self.assertEqual(max_r, solver.max_range)
+            self.assertEqual(min_r, solver.min_range)
+            self.assertEqual(max_r, solver.max_range)
             self.assertEqual(sorted_true_answers, experimental_solver)
-            break
+            # break
 
     @unittest.skip("this is literally grovers diffusion operator, thinking about removing this test entirely")
     def test_grover_diffusion(self):
