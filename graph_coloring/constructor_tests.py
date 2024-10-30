@@ -11,8 +11,8 @@ from numpy import array
 from qiskit import QuantumRegister, QuantumCircuit, ClassicalRegister
 from qiskit_aer.backends import AerSimulator
 
-from graph_coloring.circuit_constructor import Graph2Cut
-from constructor_test_helpers import solver_test_correct_answers
+from graph_coloring.base_circuit_constructor import Graph2Cut
+from constructor_test_helpers import solver_2color_test_correct_answers
 
 class ConstructorTester(unittest.TestCase):
 
@@ -542,9 +542,9 @@ class ConstructorTester(unittest.TestCase):
         """
         test if condition sub-circuit really flags the state for given solution
         """
-        node_count = solver_test_correct_answers["node_count"]
-        edges = solver_test_correct_answers["edge_list"]
-        correct_answers = solver_test_correct_answers["solutions_per_cut_number"]
+        node_count = solver_2color_test_correct_answers["node_count"]
+        edges = solver_2color_test_correct_answers["edge_list"]
+        correct_answers = solver_2color_test_correct_answers["solutions_per_cut_number"]
         # original cases were solved with "=" conditional that worked correctly and iterated over
         # this could be possible test improvement idea
         cases_1 = [

@@ -166,6 +166,7 @@ class Graph2Cut:
 
     def _simulation_memory_usage_limit(self) -> int:
         """calculates how many MB of memory to use when specified"""
+        # let it always use up to 30% of maximum system memory, not more:
 
     def _minimal_adder_size(self):
         return floor(log2(len(self.edge_list)))+1

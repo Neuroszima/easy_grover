@@ -1,4 +1,4 @@
-from graph_coloring.circuit_constructor import Graph2Cut
+from graph_coloring.base_circuit_constructor import Graph2Cut
 from graph_coloring.graph_visualizer import Graph2CutVisualizer
 
 

@@ -2,7 +2,7 @@
 
 # these are valid solutions for specific graph used in solution checking test:
 
-solver_test_correct_answers = {
+solver_2color_test_correct_answers = {
     "node_count": 7,
     "edge_list": [(0, 1), (0, 2), (0, 5), (1, 3), (2, 4), (2, 6), (3, 5), (4, 6)],
     "solutions_per_cut_number": {

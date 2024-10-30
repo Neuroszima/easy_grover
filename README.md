@@ -51,11 +51,11 @@ number of nodes, then decide how many edges need to be cut. Only equality operan
 will only present graph coloring for the matching number of cuts in the graph structure.
 
 ```python
-from graph_coloring import circuit_constructor
+from graph_coloring import base_circuit_constructor
 
 graph_nodes = 3
 edges = [(0, 1), (1, 2)]
-graph_cutter = circuit_constructor.Graph2Cut(
+graph_cutter = base_circuit_constructor.Graph2Cut(
    nodes=graph_nodes,
    edges=edges,
    cuts_number=len(edges),
@@ -91,13 +91,13 @@ To enable this behaviour, pass in desired conditional, and enable experimental m
 
 ```python
 
-from graph_coloring import circuit_constructor
+from graph_coloring import base_circuit_constructor
 
 nodes_ = 10
 edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
-          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+         [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
-graph_cutter = circuit_constructor.Graph2Cut(
+graph_cutter = base_circuit_constructor.Graph2Cut(
    nodes=nodes_,
    edges=edges,
    cuts_number=len(edges),
@@ -114,24 +114,23 @@ features showcased, is in main file or below this paragraph:
 *cuts_number >= 9 "(len(edges) - 7 = 16 - 7 = 9)"*
 
 ```python
-from graph_coloring import circuit_constructor
+from graph_coloring import base_circuit_constructor
 from numpy import array
 from matplotlib import pyplot as plt
 
 nodes_ = 10
 edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
-          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
-
+         [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
 matrix_form = [
-    [0 for _ in range(nodes_)] for _ in range(nodes_)
+   [0 for _ in range(nodes_)] for _ in range(nodes_)
 ]
 for i, j in edges:
-    matrix_form[i][j] = 1
+   matrix_form[i][j] = 1
 
-matrix_cut_ge = circuit_constructor.Graph2Cut(
-    nodes_, edges=array(matrix_form), cuts_number=len(edges)-7, optimization="qbits",
-    condition=">=", allow_experimental_runs=True)
+matrix_cut_ge = base_circuit_constructor.Graph2Cut(
+   nodes_, edges=array(matrix_form), cuts_number=len(edges) - 7, optimization="qbits",
+   condition=">=", allow_experimental_runs=True)
 matrix_cut_ge.solve(shots=10000, diffusion_iterations=1, seed_simulator=100)
 circ_test = matrix_cut_ge._complex_condition_checking()
 
@@ -151,14 +150,14 @@ If you'd like to visualize a graph itself, you could enhance the pipline by just
 extending it by appending 2 lines at the end of your script. You could do in a way similar to the one presented below:
 
 ```python
-from graph_coloring import circuit_constructor, graph_visualizer
+from graph_coloring import base_circuit_constructor, graph_visualizer
 
 nodes_ = 10
 edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
-          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+         [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
-solver = circuit_constructor.Graph2Cut(
-   nodes_, edges, cuts_number=len(edges)-6, optimization='qbits')
+solver = base_circuit_constructor.Graph2Cut(
+   nodes_, edges, cuts_number=len(edges) - 6, optimization='qbits')
 solver.solve(shots=10000, diffusion_iterations=1)
 solver.solution_analysis()
 
@@ -169,14 +168,14 @@ visualiser.draw_graph(present_solution=True, select_good=True)
 <b>NEW:</b> Added solution cost calculations, exposed through **size()** method:
 
 ```python
-from graph_coloring import circuit_constructor
+from graph_coloring import base_circuit_constructor
 
 nodes_ = 10
 edges = [[1, 9], [4, 5], [2, 8], [3, 5], [1, 3], [0, 9], [2, 9],
-          [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
+         [5, 9], [1, 8], [0, 4], [2, 3], [2, 4], [8, 9], [5, 8], [1, 6], [1, 7]]
 
-solver = circuit_constructor.Graph2Cut(
-   nodes_, edges, cuts_number=len(edges)-5, optimization='qbits')
+solver = base_circuit_constructor.Graph2Cut(
+   nodes_, edges, cuts_number=len(edges) - 5, optimization='qbits')
 solver.solve(shots=10000, diffusion_iterations=1)
 solver.size(as_dict=False)  # prints out directly ot console
 ```

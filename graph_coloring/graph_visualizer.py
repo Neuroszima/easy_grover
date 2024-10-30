@@ -9,7 +9,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Circle
 from matplotlib.spines import Spine
 from matplotlib.text import Text
-from graph_coloring.circuit_constructor import Graph2Cut
+from graph_coloring.base_circuit_constructor import Graph2Cut
 
 DIM_TYPE = list[int, int] | tuple[int, int]
 SCALE_TYPE = list[float, float] | tuple[float, float]
