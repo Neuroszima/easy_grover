@@ -3,10 +3,12 @@ from typing import Optional
 from warnings import warn
 from abc import ABC, abstractmethod
 
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, QuantumRegister
+from qiskit.circuit import Qubit
 from qiskit.exceptions import ExperimentalWarning, QiskitError
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import Unroll3qOrMore
+from qiskit.circuit.library.standard_gates.x import XGate
 
 from matplotlib import pyplot as plt
 
@@ -18,7 +20,7 @@ class BaseOperator(ABC):
     this operator allocates without the need to call separate 'allocate_qbits' method like Graph2Cut or similar do
     """
     def __init__(self, negate_outcome=False):
-        warn("this is an experimental circuit, that should be not abused, use other methods "
+        warn("this is an experimental circuit, that is still subject to many changes, use other methods "
              "to achieve results", category=ExperimentalWarning)
 
         self.circuit: QuantumCircuit | None = None
@@ -92,6 +94,44 @@ class BaseOperator(ABC):
         raise RuntimeError("Circuit does not exist so operation reversion is not possible")
 
 
+class GroverOperator(BaseOperator):
+    """
+    This defines the grover operator, with all the sweetness of inherited class helpers
+    """
+    def __init__(
+        self, num_of_qbits_covered: int | None = None, operated_register: QuantumRegister | list[Qubit] | None = None
+    ):
+        if num_of_qbits_covered:
+            self.quantum_register = QuantumRegister(num_of_qbits_covered)
+        elif operated_register:
+            if isinstance(operated_register, QuantumRegister):
+                self.quantum_register = operated_register
+            elif isinstance(operated_register, list):
+                self.quantum_register = QuantumRegister(bits=operated_register)
+            else:
+                raise TypeError(f"register passed to this constructor is of wrong type: {operated_register.__class__}")
+        else:
+            raise InitializationError("You should pass either a num of qbits that operator works over, of a register")
+
+        self.multicontrolled_xgate = XGate().control(len(self.quantum_register)-1)
+
+        super().__init__()
+
+    def _initialize_circuit(self):
+        self.circuit = QuantumCircuit(self.quantum_register)
+
+        self.circuit.h(self.quantum_register)
+        self.circuit.x(self.quantum_register)
+
+        # I had troubles with qiskit recognizing n-(c)ZGate, this construct seems to work as an equivalent
+        self.circuit.h(self.quantum_register[-1])
+        self.circuit.append(self.multicontrolled_xgate, [*self.quantum_register])
+        self.circuit.h(self.quantum_register[-1])
+
+        self.circuit.x(self.quantum_register)
+        self.circuit.h(self.quantum_register)
+
+
 class InitializationError(QiskitError):
     pass
 
@@ -99,3 +139,8 @@ class InitializationError(QiskitError):
 class OperatorError(QiskitError):
     pass
 
+
+if __name__ == '__main__':
+    g = GroverOperator(4)
+    g.size()
+    g.draw(output='mpl')

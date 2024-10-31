@@ -101,50 +101,7 @@ class EqualityOperator3Ancilla(BaseOperator):
                     self.circuit.x(self.second_register[i])
 
 
-class GroverOperator(BaseOperator):
-    """
-    This defines the grover operator, with all the sweetness of inherited class helpers
-    """
-    def __init__(
-        self, num_of_qbits_covered: int | None = None, operated_register: QuantumRegister | list[Qubit] | None = None
-    ):
-        if num_of_qbits_covered:
-            self.quantum_register = QuantumRegister(num_of_qbits_covered)
-        elif operated_register:
-            if isinstance(operated_register, QuantumRegister):
-                self.quantum_register = operated_register
-            elif isinstance(operated_register, list):
-                self.quantum_register = QuantumRegister(bits=operated_register)
-            else:
-                raise TypeError(f"register passed to this constructor is of wrong type: {operated_register.__class__}")
-        else:
-            raise InitializationError("You should pass either a num of qbits that operator works over, of a register")
-
-        self.multicontrolled_xgate = XGate().control(len(self.quantum_register)-1)
-
-        super().__init__()
-
-    def _initialize_circuit(self):
-        self.circuit = QuantumCircuit(self.quantum_register)
-
-        self.circuit.h(self.quantum_register)
-        self.circuit.x(self.quantum_register)
-
-        # I had troubles with qiskit recognizing n-(c)ZGate, this construct seems to work as an equivalent
-        self.circuit.h(self.quantum_register[-1])
-        self.circuit.append(self.multicontrolled_xgate, [*self.quantum_register])
-        self.circuit.h(self.quantum_register[-1])
-
-        self.circuit.x(self.quantum_register)
-        self.circuit.h(self.quantum_register)
-
-
 if __name__ == '__main__':
     eq = EqualityOperator3Ancilla([0, 1, 2], 2, negate_outcome=True)
-
     eq.size()
     eq.draw(output='mpl')
-
-    g = GroverOperator(4)
-    g.size()
-    g.draw(output='mpl')
