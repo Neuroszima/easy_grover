@@ -94,6 +94,16 @@ class BaseOperator(ABC):
         raise RuntimeError("Circuit does not exist so operation reversion is not possible")
 
 
+class CircuitBook(ABC):
+    """
+    Base class that could serve as platform for operators, that are based on applying several smaller circuits,
+    either in a row immediately, or interleaved (with, lets say, conditional checks)
+    """
+    def __init__(self, negaet_each_outcome=False):
+        warn("this is an experimental circuit, that is still subject to many changes, use other methods "
+             "to achieve results", category=ExperimentalWarning)
+
+
 class GroverOperator(BaseOperator):
     """
     This defines the grover operator, with all the sweetness of inherited class helpers
