@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from copy import deepcopy
 from typing import Optional, Literal
 from warnings import warn
 from abc import ABC, abstractmethod
@@ -36,7 +37,11 @@ class BaseOperator(ABC):
         if inplace:
             external_circuit.compose(self.circuit, inplace=inplace)
         else:
-            return external_circuit.compose(self.circuit, inplace=inplace)
+            # following should not be problematic in smaller cases; in huge cases of several
+            # hundred instances however deepcopy might fail due to memory occupation (maybe? idk?).
+            # We do this to have completely separate instance
+            e_c = deepcopy(external_circuit)
+            return e_c.compose(self.circuit, inplace=inplace)
 
     @abstractmethod
     def _initialize_circuit(self):
@@ -103,7 +108,7 @@ class BaseOperator(ABC):
 
         The qbits selected for negation are selected based on "0"s in the binary representation of the integer. This
         is the behaviour that reflects preparation of the registers, prior to condition checking. You can also
-        prepend XGates on "1" when used as "slected_place_marker"
+        prepend XGates on "1" when used as "selected_place_marker"
 
         :param negation_marker: "0" or "1", by default behaves as "0" selected
         :param register: quantum register, that XGates have to be applied on
@@ -132,10 +137,106 @@ class CircuitBook(ABC):
     """
     Base class that could serve as platform for operators, that are based on applying several smaller circuits,
     either in a row immediately, or interleaved (with, lets say, conditional checks)
+
+    When initialized, the "circuits" field is populated based on the master rule with sub-circuits that are ready
+    to be composed into bigger solution.
     """
-    def __init__(self, negate_each_outcome=False):
+    def __init__(self):
         warn("this is an experimental circuit, that is still subject to many changes, use other methods "
              "to achieve results", category=ExperimentalWarning)
+
+        self.circuits: list[QuantumCircuit] | None = None
+        self._gates_total: OrderedDict | None = None
+        self._qbits_max: int | None = None
+        self.__current_circuit_index = 0  # for iteration purposes
+        self._initialize_circuits()
+
+    def __getitem__(self, item: int):
+        return self.circuits[item]
+
+    def __len__(self):
+        return len(self.circuits)
+
+    def __reversed__(self):
+        return reversed(self.circuits)
+
+    def __call__(
+        self, external_circuit: QuantumCircuit, *, inplace=False, index=None, **kwargs
+    ) -> Optional["QuantumCircuit"]:
+        """
+        Use this when you are sure you want to either simply apply a single gate out of the book (provide index if
+        you want), or when you want to apply every single sub-circuit one-by-one, however at once
+        """
+        if isinstance(index, int):
+            if inplace:
+                external_circuit.compose(self.circuits[index], inplace=inplace)
+                return
+            else:
+                return external_circuit.compose(self.circuits[index], inplace=inplace)
+        else:  # assume all circuits to be applied from the book:
+            if inplace:
+                for circuit in self.circuits:
+                    external_circuit.compose(circuit, inplace=inplace)
+
+        # if all false:
+        # following should not be problematic in smaller cases; in huge cases of several hundred instances however
+        # deepcopy might fail due to memory occupation (maybe? idk?). We do this to have completely separate instance
+        e_c = deepcopy(external_circuit)
+        for circuit in self.circuits:
+            e_c = e_c.compose(circuit, inplace)
+        return e_c
+
+    @abstractmethod
+    def _initialize_circuits(self):
+        """override this to define the behaviour of operator and create construction chain"""
+        raise NotImplementedError("implement this function to properly instantiate Operator objects")
+
+    def reverse_ops_all(self):
+        """
+        Return class object with the book that has every single original circuit, except every circuit
+        has their operations reversed
+        """
+        # I debated on providing this method to all the children classes but idk if absolutely every single class
+        # has to implement this, so i will leave this decision for a user to make.
+        raise NotImplementedError(f"This method is not defined for class {self.__class__}")
+
+    def size(self, as_dict=False):
+        """
+        provides a method to evaluate complexity of full array of sub-circuits, counting base
+        gates that make them up, as well as max qubits usage among the sub-circuits
+
+        :param as_dict: instead of printing out contents, return dictionary for further processing
+        """
+        if isinstance(self.circuits, list):
+            for c in self.circuits:
+                pass_manager = PassManager(Unroll3qOrMore(basis_gates=['cx', 'u3']))
+                substitution = pass_manager.run(c)
+                if self._gates_total is None:
+                    self._gates_total: OrderedDict = substitution.count_ops()
+                else:
+                    g = substitution.count_ops()
+                    for key in g:
+                        if key in self._gates_total:
+                            self._gates_total[key] += g[key]
+                        else:
+                            self._gates_total = key
+
+        d = {
+            "q_bits": self._qbits_max,  # this param has to be set at the runtime
+            "base_instruction_count": self._gates_total
+        }
+
+        if as_dict:
+            return d
+        else:
+            for key in d:
+                if key == "base_instruction_count" and self._gates_total:
+                    print("%s: {" % key)
+                    for k_ in d[key]:
+                        print(f"    {k_}: {d[key][k_]},")
+                    print("}")
+                else:
+                    print(f"{key}: {d[key]},")
 
 
 class GroverOperator(BaseOperator):

@@ -50,6 +50,11 @@ class ConditionalPhaseFlipper(BaseOperator):
         self.circuit.compose(neg, inplace=True)
 
 
+class MulticonditionalPhaseFlipper(CircuitBook):
+    pass
+
+
+
 if __name__ == '__main__':
     from matplotlib import pyplot as plt
     from qiskit_aer import AerSimulator
