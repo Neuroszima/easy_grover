@@ -1,3 +1,6 @@
+from copy import deepcopy
+from typing import Optional
+
 from qiskit import QuantumRegister, QuantumCircuit
 from qiskit.circuit import Qubit
 from qiskit.circuit.library.standard_gates.x import XGate
@@ -34,9 +37,9 @@ class ConditionalPhaseFlipper(BaseOperator):
         else:
             self.ancilla_register = QuantumRegister(bits=ancilla_register, name="anc")
 
-        self.cx_gate = XGate().control(len(self.condition_register))
+        self.cx_gate = XGate().control(len(condition_register))
 
-        super().__init__()
+        super().__init__(target_register=[*condition_register, *ancilla_register])
 
     def _initialize_circuit(self):
         self.circuit = QuantumCircuit(self.condition_register, self.ancilla_register)
@@ -48,6 +51,13 @@ class ConditionalPhaseFlipper(BaseOperator):
         self.circuit.z(self.ancilla_register[-1])
         self.circuit.append(self.cx_gate, [*self.condition_register, *self.ancilla_register])
         self.circuit.compose(neg, inplace=True)
+
+    def size(self, as_dict=False, target_only_as_linker=False):
+        """
+        This class uses 'target_register' object field as a link to correctly compose into external circuits
+        It should be excluded from size calculation
+        """
+        super().size(target_only_as_linker=True)
 
 
 class MulticonditionalPhaseFlipper(CircuitBook):
@@ -75,6 +85,9 @@ if __name__ == '__main__':
     circuit.barrier()
     g(circuit, inplace=True)
     circuit.measure(condi_reg, results_reg)
+
+    flipper.size()
+    g.size()
 
     job = AerSimulator().run(circuit, shots=10000)
     counts = job.result().get_counts()

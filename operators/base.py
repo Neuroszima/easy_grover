@@ -20,10 +20,11 @@ class BaseOperator(ABC):
 
     this operator allocates without the need to call separate 'allocate_qbits' method like Graph2Cut or similar do
     """
-    def __init__(self, negate_outcome=False):
+    def __init__(self, target_register: QuantumRegister | list[Qubit], negate_outcome=False):
         warn("this is an experimental circuit, that is still subject to many changes, use other methods "
              "to achieve results", category=ExperimentalWarning)
 
+        self.target_register = target_register
         self.circuit: QuantumCircuit | None = None
         self.negate_outcome = negate_outcome
         self._gates_total: OrderedDict | None = None
@@ -31,24 +32,27 @@ class BaseOperator(ABC):
         self._initialize_circuit()
 
     def __call__(
-            self, external_circuit: QuantumCircuit, *, inplace=False, **kwargs
+        self, external_circuit: QuantumCircuit, *, inplace=False, **kwargs  # qbits=None,
     ) -> Optional["QuantumCircuit"]:
-
+        """
+        perform circuit composition when invoking call on a class object
+        you can specify which qbits should be the target for circuit application by passing them into 'qbits' param
+        """
         if inplace:
-            external_circuit.compose(self.circuit, inplace=inplace)
+            external_circuit.compose(self.circuit, qubits=self.target_register, inplace=inplace, inline_captures=True)  # qubits=qbits,
         else:
             # following should not be problematic in smaller cases; in huge cases of several
             # hundred instances however deepcopy might fail due to memory occupation (maybe? idk?).
             # We do this to have completely separate instance
             e_c = deepcopy(external_circuit)
-            return e_c.compose(self.circuit, inplace=inplace)
+            return e_c.compose(self.circuit, qubits=self.target_register, inplace=inplace, inline_captures=True)  # qubits=qbits,
 
     @abstractmethod
     def _initialize_circuit(self):
         """override this to define the behaviour of operator and create construction chain"""
         raise NotImplementedError("implement this function to properly instantiate Operator objects")
 
-    def size(self, as_dict=False):
+    def size(self, as_dict=False, target_only_as_linker=False):
         """
         provides a method to evaluate future circuit performance, counting base
         gates that make up this operator circuit, as well as summary of qbits used
@@ -60,8 +64,22 @@ class BaseOperator(ABC):
             substitution = pass_manager.run(self.circuit)
             self._gates_total: OrderedDict = substitution.count_ops()
 
-        registers = [getattr(self, name) for name in [param for param in dir(self) if "_register" in param]]
-        self._qbits_total = sum([len(register) if register else 0 for register in registers])
+        if target_only_as_linker:
+            regs_names = [param for param in dir(self) if ("_register" in param) and (param != "target_register")]
+            regs_obj = [getattr(self, name_) for name_ in regs_names]
+            self._qbits_total = sum([
+                len(register)if isinstance(register, (list, QuantumRegister)) else 0
+                for register in regs_obj
+            ])
+        else:
+            registers = [
+                getattr(self, name) for name in [
+                    param for param in dir(self) if "_register" in param
+            ]]
+            self._qbits_total = sum([
+                len(register) if isinstance(register, (list, QuantumRegister)) else 0
+                for register in registers])
+
         d = {
             "q_bits": self._qbits_total,
             "base_instruction_count": self._gates_total  # unable to calculate
@@ -247,34 +265,51 @@ class GroverOperator(BaseOperator):
         self, num_of_qbits_covered: int | None = None, target_register: QuantumRegister | list[Qubit] | None = None
     ):
         if num_of_qbits_covered:
-            self.quantum_register = QuantumRegister(num_of_qbits_covered)
+            # self.quantum_register = QuantumRegister(num_of_qbits_covered)
+            register_placeholder = QuantumRegister(num_of_qbits_covered)
         elif target_register:
-            if isinstance(target_register, QuantumRegister):
-                self.quantum_register = target_register
-            elif isinstance(target_register, list):
-                self.quantum_register = QuantumRegister(bits=target_register, name='target')
+            if isinstance(target_register, (QuantumRegister, list)):
+                register_placeholder = target_register
+            # if isinstance(target_register, QuantumRegister):
+            #     self.quantum_register = target_register
+            # elif isinstance(target_register, list):
+            #     self.quantum_register = QuantumRegister(bits=target_register, name='target')
             else:
                 raise TypeError(f"register passed to this constructor is of wrong type: {target_register.__class__}")
         else:
             raise InitializationError("You should pass either a num of qbits that operator works over, of a register")
 
-        self.multicontrolled_xgate = XGate().control(len(self.quantum_register)-1)
+        # self.multicontrolled_xgate = XGate().control(len(self.quantum_register)-1)
+        self.multicontrolled_xgate = XGate().control(len(register_placeholder)-1)
 
-        super().__init__()
+        super().__init__(target_register=register_placeholder)
 
     def _initialize_circuit(self):
-        self.circuit = QuantumCircuit(self.quantum_register)
+        # self.circuit = QuantumCircuit(self.quantum_register)
+        #
+        # self.circuit.h(self.quantum_register)
+        # self.circuit.x(self.quantum_register)
+        #
+        # # I had troubles with qiskit recognizing n-(c)ZGate, this construct seems to work as an equivalent
+        # self.circuit.h(self.quantum_register[-1])
+        # self.circuit.append(self.multicontrolled_xgate, [*self.quantum_register])
+        # self.circuit.h(self.quantum_register[-1])
+        #
+        # self.circuit.x(self.quantum_register)
+        # self.circuit.h(self.quantum_register)
 
-        self.circuit.h(self.quantum_register)
-        self.circuit.x(self.quantum_register)
+        self.circuit = QuantumCircuit(self.target_register)
+
+        self.circuit.h(self.target_register)
+        self.circuit.x(self.target_register)
 
         # I had troubles with qiskit recognizing n-(c)ZGate, this construct seems to work as an equivalent
-        self.circuit.h(self.quantum_register[-1])
-        self.circuit.append(self.multicontrolled_xgate, [*self.quantum_register])
-        self.circuit.h(self.quantum_register[-1])
+        self.circuit.h(self.target_register[-1])
+        self.circuit.append(self.multicontrolled_xgate, [*self.target_register])
+        self.circuit.h(self.target_register[-1])
 
-        self.circuit.x(self.quantum_register)
-        self.circuit.h(self.quantum_register)
+        self.circuit.x(self.target_register)
+        self.circuit.h(self.target_register)
 
 
 class InitializationError(QiskitError):
