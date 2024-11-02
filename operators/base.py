@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Optional
+from typing import Optional, Literal
 from warnings import warn
 from abc import ABC, abstractmethod
 
@@ -55,8 +55,8 @@ class BaseOperator(ABC):
             substitution = pass_manager.run(self.circuit)
             self._gates_total: OrderedDict = substitution.count_ops()
 
-        regiters = [getattr(self, name) for name in [param for param in dir(self) if "_register" in param]]
-        self._qbits_total = sum([len(register) if register else 0 for register in regiters])
+        registers = [getattr(self, name) for name in [param for param in dir(self) if "_register" in param]]
+        self._qbits_total = sum([len(register) if register else 0 for register in registers])
         d = {
             "q_bits": self._qbits_total,
             "base_instruction_count": self._gates_total  # unable to calculate
@@ -93,13 +93,47 @@ class BaseOperator(ABC):
             return self.circuit.reverse_ops()
         raise RuntimeError("Circuit does not exist so operation reversion is not possible")
 
+    @staticmethod
+    def _negate_register(
+        register: QuantumRegister, integer_repr: int, negation_marker: Optional[Literal['0', '1']] = None,
+        # skipped_qbits: list[None] | None = None
+    ) -> QuantumCircuit:
+        """
+        Perform negation on the register, based on the integer passed to this method
+
+        The qbits selected for negation are selected based on "0"s in the binary representation of the integer. This
+        is the behaviour that reflects preparation of the registers, prior to condition checking. You can also
+        prepend XGates on "1" when used as "slected_place_marker"
+
+        :param negation_marker: "0" or "1", by default behaves as "0" selected
+        :param register: quantum register, that XGates have to be applied on
+        :param integer_repr: integer for a condition check to happen against, or just a "recipe" for gate application
+        :returns: circuit ready to compose into bigger structure
+        """
+        # skipped qbits may be used in future
+        circuit = QuantumCircuit(register)
+
+        if negation_marker is None:
+            negation_marker = "0"
+
+        if negation_marker not in ["0", "1"]:
+            raise ValueError("only valid values for markers are: (\"0\", \"1\")")
+
+        condi_repr = bin(integer_repr)[2:].zfill(len(register))
+
+        for index, c in enumerate(reversed(condi_repr)):
+            if c == negation_marker:
+                circuit.x(index)
+
+        return circuit
+
 
 class CircuitBook(ABC):
     """
     Base class that could serve as platform for operators, that are based on applying several smaller circuits,
     either in a row immediately, or interleaved (with, lets say, conditional checks)
     """
-    def __init__(self, negaet_each_outcome=False):
+    def __init__(self, negate_each_outcome=False):
         warn("this is an experimental circuit, that is still subject to many changes, use other methods "
              "to achieve results", category=ExperimentalWarning)
 
@@ -109,17 +143,17 @@ class GroverOperator(BaseOperator):
     This defines the grover operator, with all the sweetness of inherited class helpers
     """
     def __init__(
-        self, num_of_qbits_covered: int | None = None, operated_register: QuantumRegister | list[Qubit] | None = None
+        self, num_of_qbits_covered: int | None = None, target_register: QuantumRegister | list[Qubit] | None = None
     ):
         if num_of_qbits_covered:
             self.quantum_register = QuantumRegister(num_of_qbits_covered)
-        elif operated_register:
-            if isinstance(operated_register, QuantumRegister):
-                self.quantum_register = operated_register
-            elif isinstance(operated_register, list):
-                self.quantum_register = QuantumRegister(bits=operated_register)
+        elif target_register:
+            if isinstance(target_register, QuantumRegister):
+                self.quantum_register = target_register
+            elif isinstance(target_register, list):
+                self.quantum_register = QuantumRegister(bits=target_register, name='target')
             else:
-                raise TypeError(f"register passed to this constructor is of wrong type: {operated_register.__class__}")
+                raise TypeError(f"register passed to this constructor is of wrong type: {target_register.__class__}")
         else:
             raise InitializationError("You should pass either a num of qbits that operator works over, of a register")
 

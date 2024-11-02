@@ -47,9 +47,9 @@ class EqualityOperator3Ancilla(BaseOperator):
             if isinstance(result_storage_register, QuantumRegister):
                 self.ancilla_register = result_storage_register
             elif isinstance(result_storage_register, Qubit):
-                self.ancilla_register = QuantumRegister(bits=[result_storage_register])
+                self.ancilla_register = QuantumRegister(bits=[result_storage_register], name='anc')
             else:
-                self.ancilla_register = QuantumRegister(bits=result_storage_register)
+                self.ancilla_register = QuantumRegister(bits=result_storage_register, name='anc')
 
         # wrong initialization
         else:
