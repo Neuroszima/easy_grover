@@ -32,32 +32,44 @@ class BaseOperator(ABC):
         self._initialize_circuit()
 
     def __call__(
-        self, external_circuit: QuantumCircuit, *, inplace=False, **kwargs  # qbits=None,
+        self, external_circuit: QuantumCircuit, /,
+        targets: list[int | Qubit] | QuantumRegister | None = None, *, inplace=False,
     ) -> Optional["QuantumCircuit"]:
         """
         perform circuit composition when invoking call on a class object
-        you can specify which qbits should be the target for circuit application by passing them into 'qbits' param
+        you can specify which qbits should be the target for circuit linking by passing them into 'qbits' param
         """
+        __targets = targets if targets is not None else self.target_register
+        # if not targets:
         if inplace:
-            external_circuit.compose(self.circuit, qubits=self.target_register, inplace=inplace, inline_captures=True)  # qubits=qbits,
+            external_circuit.compose(
+                self.circuit, qubits=__targets,
+                inplace=inplace, inline_captures=True)  # qubits=qbits,
         else:
             # following should not be problematic in smaller cases; in huge cases of several
             # hundred instances however deepcopy might fail due to memory occupation (maybe? idk?).
             # We do this to have completely separate instance
             e_c = deepcopy(external_circuit)
-            return e_c.compose(self.circuit, qubits=self.target_register, inplace=inplace, inline_captures=True)  # qubits=qbits,
+            return e_c.compose(
+                self.circuit, qubits=__targets,
+                inplace=inplace, inline_captures=True)  # qubits=qbits,
 
     @abstractmethod
     def _initialize_circuit(self):
         """override this to define the behaviour of operator and create construction chain"""
         raise NotImplementedError("implement this function to properly instantiate Operator objects")
 
-    def size(self, as_dict=False, target_only_as_linker=False):
+    def size(self, *, as_dict=False, target_only_as_linker=False):
         """
         provides a method to evaluate future circuit performance, counting base
         gates that make up this operator circuit, as well as summary of qbits used
 
         :param as_dict: instead of printing out contents, return dictionary for further processing
+        :param target_only_as_linker: internal field self.target_register can be set up by a user to
+            actually be used in circuit construction, or for example only as a list of integers to be used in linking,
+            while circuit construction process being independent of this field. If second is the case, it is pointless
+            to count self.target_register as additional qubit cost in the final circuit assembly. This toggle corrects
+            this mistake, and prevents showing increased, or straight up doubled the qubit size of the circuit.
         """
         if isinstance(self.circuit, QuantumCircuit):
             pass_manager = PassManager(Unroll3qOrMore(basis_gates=['cx', 'u3']))
@@ -158,25 +170,30 @@ class CircuitBook(ABC):
 
     When initialized, the "circuits" field is populated based on the master rule with sub-circuits that are ready
     to be composed into bigger solution.
+
+    IF PERFORMING REVERSE - THIS CLASS RETURNS "zip(reversed(...), reversed(...))" AS IT HAS TO DO IT TO REVERSE
+    BOTH self.circuits AS WELL AS self.targets_array TO BE COHERENT!!! Feel warned about using it with "reversed()"
+    builtin
     """
-    def __init__(self):
+    def __init__(self, targets_array: list[QuantumRegister | list[int | Qubit]]):
         warn("this is an experimental circuit, that is still subject to many changes, use other methods "
              "to achieve results", category=ExperimentalWarning)
 
         self.circuits: list[QuantumCircuit] | None = None
+        self.targets_array = targets_array
         self._gates_total: OrderedDict | None = None
         self._qbits_max: int | None = None
         self.__current_circuit_index = 0  # for iteration purposes
         self._initialize_circuits()
 
     def __getitem__(self, item: int):
-        return self.circuits[item]
+        return self.circuits[item], self.targets_array[item]
 
     def __len__(self):
         return len(self.circuits)
 
     def __reversed__(self):
-        return reversed(self.circuits)
+        return zip(reversed(self.circuits), reversed(self.targets_array))
 
     def __call__(
         self, external_circuit: QuantumCircuit, *, inplace=False, index=None, **kwargs
@@ -187,21 +204,28 @@ class CircuitBook(ABC):
         """
         if isinstance(index, int):
             if inplace:
-                external_circuit.compose(self.circuits[index], inplace=inplace)
+                external_circuit.compose(
+                    self.circuits[index], qubits=self.targets_array[index],
+                    inplace=inplace, inline_captures=True
+                )
                 return
             else:
-                return external_circuit.compose(self.circuits[index], inplace=inplace)
+                e_c = deepcopy(external_circuit)
+                return e_c.compose(
+                    self.circuits[index], qubits=self.targets_array[index],
+                    inplace=inplace, inline_captures=True
+                )
         else:  # assume all circuits to be applied from the book:
             if inplace:
-                for circuit in self.circuits:
-                    external_circuit.compose(circuit, inplace=inplace)
+                for circuit_, target in zip(self.circuits, self.targets_array):
+                    external_circuit.compose(circuit_, qubits=target, inplace=inplace, inline_captures=True)
 
         # if all false:
         # following should not be problematic in smaller cases; in huge cases of several hundred instances however
         # deepcopy might fail due to memory occupation (maybe? idk?). We do this to have completely separate instance
         e_c = deepcopy(external_circuit)
-        for circuit in self.circuits:
-            e_c = e_c.compose(circuit, inplace)
+        for circuit__, target in zip(self.circuits, self.targets_array):
+            e_c = e_c.compose(circuit__, qubits=target, inplace=inplace, inline_captures=True)
         return e_c
 
     @abstractmethod
@@ -265,38 +289,20 @@ class GroverOperator(BaseOperator):
         self, num_of_qbits_covered: int | None = None, target_register: QuantumRegister | list[Qubit] | None = None
     ):
         if num_of_qbits_covered:
-            # self.quantum_register = QuantumRegister(num_of_qbits_covered)
             register_placeholder = QuantumRegister(num_of_qbits_covered)
         elif target_register:
             if isinstance(target_register, (QuantumRegister, list)):
                 register_placeholder = target_register
-            # if isinstance(target_register, QuantumRegister):
-            #     self.quantum_register = target_register
-            # elif isinstance(target_register, list):
-            #     self.quantum_register = QuantumRegister(bits=target_register, name='target')
             else:
                 raise TypeError(f"register passed to this constructor is of wrong type: {target_register.__class__}")
         else:
             raise InitializationError("You should pass either a num of qbits that operator works over, of a register")
 
-        # self.multicontrolled_xgate = XGate().control(len(self.quantum_register)-1)
         self.multicontrolled_xgate = XGate().control(len(register_placeholder)-1)
 
         super().__init__(target_register=register_placeholder)
 
     def _initialize_circuit(self):
-        # self.circuit = QuantumCircuit(self.quantum_register)
-        #
-        # self.circuit.h(self.quantum_register)
-        # self.circuit.x(self.quantum_register)
-        #
-        # # I had troubles with qiskit recognizing n-(c)ZGate, this construct seems to work as an equivalent
-        # self.circuit.h(self.quantum_register[-1])
-        # self.circuit.append(self.multicontrolled_xgate, [*self.quantum_register])
-        # self.circuit.h(self.quantum_register[-1])
-        #
-        # self.circuit.x(self.quantum_register)
-        # self.circuit.h(self.quantum_register)
 
         self.circuit = QuantumCircuit(self.target_register)
 
@@ -321,6 +327,33 @@ class OperatorError(QiskitError):
 
 
 if __name__ == '__main__':
+    from matplotlib import pyplot as plt
+    from qiskit_aer import AerSimulator
+    # from operators.base import GroverOperator
+    from qiskit import ClassicalRegister
+
     g = GroverOperator(4)
     g.size()
     g.draw(output='mpl')
+
+    circuit = QuantumCircuit(6, 6)
+    circuit.h(0)
+    circuit.h(1)
+    circuit.h(2)
+    circuit.h(3)
+    circuit.h(4)
+
+    circuit.ccx(3, 4, 5)
+    circuit.z(5)
+    circuit.ccx(3, 4, 5)
+    circuit.barrier()
+    g(circuit, [1,2,3,4], inplace=True)
+    circuit.measure([*range(6)], [*range(6)])
+
+    circuit.draw(output='mpl')
+    plt.show()
+
+    job = AerSimulator().run(circuit, shots=10000)
+    counts = job.result().get_counts()
+
+    print(sorted([(k, counts[k]) for k in counts], key=lambda e: -e[1]))

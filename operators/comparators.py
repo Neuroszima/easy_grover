@@ -20,7 +20,7 @@ class EqualityOperator3Ancilla(BaseOperator):
         self, numbers_checked: list, compare_register_size: int | None = None,
         first_register: QuantumRegister | list[Qubit] | None = None,
         second_register: QuantumRegister | list[Qubit] | None = None,
-        result_storage_register: QuantumRegister | list[Qubit] | Qubit | None = None, negate_outcome=False
+        result_storage_register: QuantumRegister | list[Qubit] | None = None, negate_outcome=False
     ):
 
         # first initialization method - only int passed
@@ -35,21 +35,27 @@ class EqualityOperator3Ancilla(BaseOperator):
 
         # second init - registers have been passed or lists of Qubits (for example -> unpacked registers)
         elif all([first_register, second_register, result_storage_register]) and (not compare_register_size):
-            if isinstance(first_register, QuantumRegister):
-                self.first_register = first_register
-            else:
-                self.first_register = QuantumRegister(bits=first_register, name="first")
-            if isinstance(second_register, QuantumRegister):
-                self.second_register = second_register
-            else:
-                self.second_register = QuantumRegister(bits=second_register, name="second")
+            # if isinstance(first_register, QuantumRegister):
+            #     self.first_register = first_register
+            # else:
+            #     self.first_register = QuantumRegister(bits=first_register, name="first")
+            self.first_register = first_register
+            # if isinstance(second_register, QuantumRegister):
+            #     self.second_register = second_register
+            # else:
+            #     self.second_register = QuantumRegister(bits=second_register, name="second")
+            self.second_register = second_register
 
-            if isinstance(result_storage_register, QuantumRegister):
+            # if isinstance(result_storage_register, QuantumRegister):
+            #     self.ancilla_register = result_storage_register
+            # elif isinstance(result_storage_register, Qubit):
+            #     self.ancilla_register = QuantumRegister(bits=[result_storage_register], name='anc')
+            # else:
+            #     self.ancilla_register = QuantumRegister(bits=result_storage_register, name='anc')
+            if (anc_reg_len := len(result_storage_register)) == 3:
                 self.ancilla_register = result_storage_register
-            elif isinstance(result_storage_register, Qubit):
-                self.ancilla_register = QuantumRegister(bits=[result_storage_register], name='anc')
             else:
-                self.ancilla_register = QuantumRegister(bits=result_storage_register, name='anc')
+                InitializationError(f"ancilla register has to be exactly 3 qbits long, meanwhile it is {anc_reg_len}")
 
         # wrong initialization
         else:
@@ -63,7 +69,14 @@ class EqualityOperator3Ancilla(BaseOperator):
 
         # we only need one instantiated gate like this
         self.multicontrolled_xgate = XGate().control(len(self.first_register))
-        super().__init__(negate_outcome=negate_outcome)
+        super().__init__(
+            negate_outcome=negate_outcome, target_register=[
+                *self.first_register, *self.second_register, *self.ancilla_register]
+        )
+
+    def size(self, as_dict=False, target_only_as_linker=False):
+        """Overwrite default behaviour of having target as meaningful part, contributing to size calc."""
+        super().size(target_only_as_linker=True)
 
     def _initialize_circuit(self):
         print("inside constructor")

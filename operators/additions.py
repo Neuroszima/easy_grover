@@ -19,44 +19,46 @@ class AdditionFullyCovered(BaseOperator):
                 "For this sub-circuit creation purposes, value register should not be of greater length than "
                 "target register. Considering swapping registers, or implement your own method of "
                 "creating addition operator")
+        self.value_register = value_register
+        self.addition_target_register = target_register
 
-        if isinstance(value_register, QuantumRegister):
-            self.value_register = value_register
-        else:
-            self.value_register = QuantumRegister(bits=value_register)
-
-        if isinstance(target_register, QuantumRegister):
-            self.target_register = target_register
-        else:
-            self.target_register = QuantumRegister(bits=target_register)
+        # if isinstance(value_register, QuantumRegister):
+        #     self.value_register = value_register
+        # else:
+        #     self.value_register = QuantumRegister(bits=value_register)
+        #
+        # if isinstance(target_register, QuantumRegister):
+        #     self.target_register = target_register
+        # else:
+        #     self.target_register = QuantumRegister(bits=target_register)
 
         self.xgate_lib = []
 
-        for i in range(len(self.target_register)):
+        for i in range(len(self.addition_target_register)):
             self.xgate_lib.append(XGate().control(i+1))
 
-        super().__init__()
+        super().__init__(target_register=[*self.value_register, *self.addition_target_register])
 
     def _initialize_circuit(self):
-        self.circuit = QuantumCircuit(self.value_register, self.target_register)
+        self.circuit = QuantumCircuit(self.value_register, self.addition_target_register)
 
         # create addition pyramid, from value register to target register
 
         for v_index, v_qbit in enumerate(self.value_register):
-            for t_index in range(len(self.target_register)):
+            for t_index in range(len(self.addition_target_register)):
                 print(f"appended gate: {(end_gate := -t_index-v_index-1)}")
-                print(f"last qbit: {(end_qbit := len(self.target_register)-t_index)}")
-                if abs(end_gate) > len(self.target_register):
+                print(f"last qbit: {(end_qbit := len(self.addition_target_register)-t_index)}")
+                if abs(end_gate) > len(self.addition_target_register):
                     continue
                 if t_index != 0:
                     self.circuit.append(
                         instruction=self.xgate_lib[end_gate],
-                        qargs=[v_qbit, *self.target_register[v_index:end_qbit]]
+                        qargs=[v_qbit, *self.addition_target_register[v_index:end_qbit]]
                     )
                 else:
                     self.circuit.append(
                         instruction=self.xgate_lib[end_gate],
-                        qargs=[v_qbit, *self.target_register[v_index:]]
+                        qargs=[v_qbit, *self.addition_target_register[v_index:]]
                     )
 
 
@@ -75,22 +77,25 @@ class AccumulateSingleBitConditions(BaseOperator):
         :param accumulator_register: target receiving all additions operations
         """
 
-        if isinstance(flags_register, QuantumRegister):
-            self.flags_register = flags_register
-        else:
-            self.flags_register = QuantumRegister(bits=flags_register)
+        # if isinstance(flags_register, QuantumRegister):
+        #     self.flags_register = flags_register
+        # else:
+        #     self.flags_register = QuantumRegister(bits=flags_register)
+        #
+        # if isinstance(accumulator_register, QuantumRegister):
+        #     self.accumulator_register = accumulator_register
+        # else:
+        #     self.accumulator_register = QuantumRegister(bits=accumulator_register)
 
-        if isinstance(accumulator_register, QuantumRegister):
-            self.accumulator_register = accumulator_register
-        else:
-            self.accumulator_register = QuantumRegister(bits=accumulator_register)
+        self.accumulator_register = accumulator_register
+        self.flags_register = flags_register
 
         self.xgate_lib = []
 
         for i in range(len(self.accumulator_register)):
             self.xgate_lib.append(XGate().control(i+1))
 
-        super().__init__()
+        super().__init__(target_register=[*self.flags_register, *self.accumulator_register])
 
     def _initialize_circuit(self):
         self.circuit = QuantumCircuit(self.flags_register, self.accumulator_register)
@@ -135,7 +140,6 @@ class AdditionRepeater(BaseOperator):
 
     This is not a usual operator, as instead of single circuit
     """
-
 
 
 if __name__ == '__main__':
