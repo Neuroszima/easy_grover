@@ -329,8 +329,6 @@ class OperatorError(QiskitError):
 if __name__ == '__main__':
     from matplotlib import pyplot as plt
     from qiskit_aer import AerSimulator
-    # from operators.base import GroverOperator
-    from qiskit import ClassicalRegister
 
     g = GroverOperator(4)
     g.size()

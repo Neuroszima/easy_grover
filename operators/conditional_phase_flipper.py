@@ -52,12 +52,12 @@ class ConditionalPhaseFlipper(BaseOperator):
         self.circuit.append(self.cx_gate, [*self.condition_register, *self.ancilla_register])
         self.circuit.compose(neg, inplace=True)
 
-    def size(self, as_dict=False, target_only_as_linker=False):
+    def size(self, *, as_dict=False, target_only_as_linker=False):
         """
         This class uses 'target_register' object field as a link to correctly compose into external circuits
         It should be excluded from size calculation
         """
-        super().size(target_only_as_linker=True)
+        return super().size(as_dict=as_dict, target_only_as_linker=True)
 
 
 class MulticonditionalPhaseFlipper(CircuitBook):

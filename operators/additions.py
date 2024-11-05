@@ -22,16 +22,6 @@ class AdditionFullyCovered(BaseOperator):
         self.value_register = value_register
         self.addition_target_register = target_register
 
-        # if isinstance(value_register, QuantumRegister):
-        #     self.value_register = value_register
-        # else:
-        #     self.value_register = QuantumRegister(bits=value_register)
-        #
-        # if isinstance(target_register, QuantumRegister):
-        #     self.target_register = target_register
-        # else:
-        #     self.target_register = QuantumRegister(bits=target_register)
-
         self.xgate_lib = []
 
         for i in range(len(self.addition_target_register)):
@@ -46,8 +36,8 @@ class AdditionFullyCovered(BaseOperator):
 
         for v_index, v_qbit in enumerate(self.value_register):
             for t_index in range(len(self.addition_target_register)):
-                print(f"appended gate: {(end_gate := -t_index-v_index-1)}")
-                print(f"last qbit: {(end_qbit := len(self.addition_target_register)-t_index)}")
+                end_gate = -t_index - v_index - 1
+                end_qbit = len(self.addition_target_register) - t_index
                 if abs(end_gate) > len(self.addition_target_register):
                     continue
                 if t_index != 0:
@@ -60,6 +50,9 @@ class AdditionFullyCovered(BaseOperator):
                         instruction=self.xgate_lib[end_gate],
                         qargs=[v_qbit, *self.addition_target_register[v_index:]]
                     )
+
+    def size(self, *, as_dict=False, target_only_as_linker=False):
+        super().size(as_dict=as_dict, target_only_as_linker=True)
 
 
 class AccumulateSingleBitConditions(BaseOperator):
@@ -76,16 +69,6 @@ class AccumulateSingleBitConditions(BaseOperator):
         :param flags_register: register containing all the conditionals that can be binary 0 or 1
         :param accumulator_register: target receiving all additions operations
         """
-
-        # if isinstance(flags_register, QuantumRegister):
-        #     self.flags_register = flags_register
-        # else:
-        #     self.flags_register = QuantumRegister(bits=flags_register)
-        #
-        # if isinstance(accumulator_register, QuantumRegister):
-        #     self.accumulator_register = accumulator_register
-        # else:
-        #     self.accumulator_register = QuantumRegister(bits=accumulator_register)
 
         self.accumulator_register = accumulator_register
         self.flags_register = flags_register
@@ -129,6 +112,9 @@ class AccumulateSingleBitConditions(BaseOperator):
             self.circuit.append(
                 gate, [qbit, *control_adder_qbits, self.accumulator_register[target_adder_bit]]
             )
+
+    def size(self, *, as_dict=False, target_only_as_linker=False):
+        return super().size(as_dict=as_dict, target_only_as_linker=True)
 
 
 class AdditionRepeater(BaseOperator):

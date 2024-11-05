@@ -36,12 +36,6 @@ class ExclusionStateInitializer(BaseOperator):
         else:
             TypeError(f"excluded states should be of type 'list', not {excluded_states.__class__}")
 
-        # if isinstance(inits_bits, list):
-        #     self.initializer_register = inits_bits
-        #     # self.initializer_register = QuantumRegister(bits=inits_bits)
-        # else:
-        #     self.initializer_register = inits_bits
-
         self.excluded_states = excluded_states
 
         super().__init__(target_register=inits_bits)
@@ -51,18 +45,14 @@ class ExclusionStateInitializer(BaseOperator):
         this class initializes state through statevector, since it is easier to achieve than preparing separate
         methods for every combination of states
         """
-        self.circuit = QuantumCircuit(self.target_register)  # self.initializer_register
+        self.circuit = QuantumCircuit(self.target_register)
 
         list_of_states = array([
             1 if i not in self.excluded_states else 0
-            for i in range(2**len(self.target_register))  # self.initializer_register
+            for i in range(2**len(self.target_register))
         ], dtype=complex)
-        print(list_of_states)
-        # probability_unit = complex(real=, imag=0)
         list_of_states *= 1/(sum(list_of_states))
-        print(list_of_states)
         list_of_states = sqrt(list_of_states)
-        print(list_of_states)
         sv = Statevector(list_of_states)
 
         self.circuit.initialize(sv)

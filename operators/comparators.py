@@ -35,23 +35,8 @@ class EqualityOperator3Ancilla(BaseOperator):
 
         # second init - registers have been passed or lists of Qubits (for example -> unpacked registers)
         elif all([first_register, second_register, result_storage_register]) and (not compare_register_size):
-            # if isinstance(first_register, QuantumRegister):
-            #     self.first_register = first_register
-            # else:
-            #     self.first_register = QuantumRegister(bits=first_register, name="first")
             self.first_register = first_register
-            # if isinstance(second_register, QuantumRegister):
-            #     self.second_register = second_register
-            # else:
-            #     self.second_register = QuantumRegister(bits=second_register, name="second")
             self.second_register = second_register
-
-            # if isinstance(result_storage_register, QuantumRegister):
-            #     self.ancilla_register = result_storage_register
-            # elif isinstance(result_storage_register, Qubit):
-            #     self.ancilla_register = QuantumRegister(bits=[result_storage_register], name='anc')
-            # else:
-            #     self.ancilla_register = QuantumRegister(bits=result_storage_register, name='anc')
             if (anc_reg_len := len(result_storage_register)) == 3:
                 self.ancilla_register = result_storage_register
             else:
@@ -74,13 +59,11 @@ class EqualityOperator3Ancilla(BaseOperator):
                 *self.first_register, *self.second_register, *self.ancilla_register]
         )
 
-    def size(self, as_dict=False, target_only_as_linker=False):
+    def size(self, *, as_dict=False, target_only_as_linker=False):
         """Overwrite default behaviour of having target as meaningful part, contributing to size calc."""
-        super().size(target_only_as_linker=True)
+        return super().size(as_dict=as_dict, target_only_as_linker=True)
 
     def _initialize_circuit(self):
-        print("inside constructor")
-        print(f"i am calling from {self.__class__} class object")
 
         chr_nums = [bin(num)[2:].zfill(len(self.first_register)) for num in self.numbers_checked]
         # check the compatibility woth the length of the registers
